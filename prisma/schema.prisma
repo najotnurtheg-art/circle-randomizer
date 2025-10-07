@@ -16,6 +16,8 @@ enum PriceTier {
   T50
   T100
   T200
+  T500
+
 }
 
 model User {
@@ -40,6 +42,7 @@ model Item {
   name      String
   tier      PriceTier
   isActive  Boolean   @default(true)
+  imageUrl  String?   // NEW
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 }
