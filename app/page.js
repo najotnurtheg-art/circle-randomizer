@@ -9,6 +9,7 @@ export default function Page() {
         <li><a href="/wheel">Wheel (Play)</a></li>
         <li><a href="/admin/items">Admin: Items</a></li>
         <li><a href="/admin/coins">Admin: Give Coins</a></li>
+  <li><a href="/admin/history">Admin: Rewards History</a></li>
       </ul>
     </main>
   );
