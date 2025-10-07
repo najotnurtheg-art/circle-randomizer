@@ -24,11 +24,15 @@ export async function POST(req) {
   const W = Number(wager);
   if (!TIERS.includes(W)) return NextResponse.json({ error: 'wager must be 50/100/200' }, { status: 400 });
 
+  // Load DB user for displayName
+  const dbUser = await prisma.user.findUnique({ where: { id: me.sub } });
+  const niceName = dbUser?.displayName || dbUser?.username || 'Player';
+
   // Ensure state row exists
   let state = await prisma.spinState.findUnique({ where: { id: 'global' } });
   if (!state) state = await prisma.spinState.create({ data: { id: 'global', status: 'IDLE' } });
 
-  // STRICT lock: if SPINNING, nobody can start a new spin (even the same user)
+  // STRICT lock: if SPINNING, nobody can start a new spin
   if (state.status !== 'IDLE') {
     return NextResponse.json({ error: `busy: ${state.username || 'another user'} is spinning` }, { status: 409 });
   }
@@ -72,7 +76,7 @@ export async function POST(req) {
   const durationMs = 10000;
   const spinStartAt = new Date();
 
-  // Debit + lock
+  // Debit + lock with pretty name
   await prisma.$transaction(async (tx) => {
     await tx.wallet.update({ where: { userId: me.sub }, data: { balance: { decrement: W } } });
     await tx.spinState.update({
@@ -80,7 +84,7 @@ export async function POST(req) {
       data: {
         status: 'SPINNING',
         userId: me.sub,
-        username: me.username,
+        username: niceName,   // show pretty name to everyone
         wager: W,
         segments,
         resultIndex: idx,
@@ -95,21 +99,22 @@ export async function POST(req) {
     await prisma.wallet.update({ where: { userId: me.sub }, data: { balance: { increment: result.amount } } });
   }
 
-  // Log reward
+  // Log reward (keep stored "username" as stable login name)
   await prisma.spinLog.create({
-    data: { userId: me.sub, username: me.username, wager: W, prize: prizeText(result) }
+    data: { userId: me.sub, username: dbUser.username, wager: W, prize: prizeText(result) }
   });
 
   const bal = await prisma.wallet.findUnique({ where: { userId: me.sub } });
 
   return NextResponse.json({
     status: 'SPINNING',
-    username: me.username,
+    userId: me.sub,
+    username: niceName,    // pretty
     segments,
     resultIndex: idx,
     spinStartAt,
     durationMs,
-    result,     // clients must only show after wheel stops
+    result,                // clients show after stop
     balance: bal?.balance ?? 0
   }, { headers: { 'Cache-Control': 'no-store' } });
 }
