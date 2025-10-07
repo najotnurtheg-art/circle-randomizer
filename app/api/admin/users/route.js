@@ -11,16 +11,17 @@ export async function GET() {
   const users = await prisma.user.findMany({
     orderBy: { createdAt: 'desc' },
     include: { wallet: true },
-    take: 500, // safety cap; raise if you need
+    take: 500,
   });
 
   const out = users.map(u => ({
     id: u.id,
     username: u.username,
+    displayName: u.displayName || u.username,  // show pretty name
     role: u.role,
     balance: u.wallet?.balance ?? 0,
     createdAt: u.createdAt,
   }));
 
-  return NextResponse.json(out);
+  return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store' } });
 }
