@@ -19,6 +19,6 @@ export async function POST(req) {
   if (!name || !tier) return NextResponse.json({ error: 'missing' }, { status: 400 });
   const t = mapTier(tier);
   if (!t) return NextResponse.json({ error: 'tier must be 50/100/200/500' }, { status: 400 });
-  const item = await prisma.item.create({ data: { name, tier: t, imageUrl } });
+  const item = await prisma.item.create({ data: { name, tier: t, imageUrl: imageUrl || null } });
   return NextResponse.json(item);
 }
