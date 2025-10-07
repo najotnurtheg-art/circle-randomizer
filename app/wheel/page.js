@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 
+const TOP_ANGLE = -Math.PI/2; // pointer is at top
+
 function label(seg) {
   if (!seg) return '';
   if (seg.type === 'item') return seg.name;
@@ -15,10 +17,12 @@ export default function WheelPage() {
   const [wager, setWager] = useState(50);
   const [balance, setBalance] = useState(0);
   const [segments, setSegments] = useState([]);
-  const [message, setMessage] = useState('');
   const [err, setErr] = useState('');
   const [state, setState] = useState({ status: 'IDLE', username: null, resultIndex: null, segments: [] });
   const [me, setMe] = useState(null);
+
+  // WIN POPUP
+  const [popup, setPopup] = useState(null); // { text, imageUrl }
 
   const draw = (a, segs) => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -35,74 +39,60 @@ export default function WheelPage() {
       ctx.fillText(label(s[i]), r*0.65, 6); ctx.restore();
     }
     ctx.restore();
+    // pointer at top
     ctx.beginPath(); ctx.moveTo(cx, 8); ctx.lineTo(cx-12, 28); ctx.lineTo(cx+12, 28); ctx.closePath(); ctx.fillStyle='#ef4444'; ctx.fill();
   };
 
-  // load me + balance
-  const loadMe = async () => {
-    const r = await fetch('/api/me');
-    if (r.ok) {
-      const j = await r.json();
-      setMe(j);
-      setBalance(j.balance || 0);
-    } else {
-      setMe(null);
-    }
+  const animateTo = (idx, segs) => {
+    if (!segs.length) return;
+    const n = segs.length; const step = 2*Math.PI/n;
+    const target = TOP_ANGLE - (idx*step + step/2); // FIXED: top pointer
+    const turns = 6; const final = target + turns*2*Math.PI;
+    const start = performance.now(); const duration = 4000;
+    const startAngle = angle%(2*Math.PI);
+    const run = (t) => { const e = Math.min(1,(t-start)/duration); const ease = 1-Math.pow(1-e,3); setAngle(startAngle+(final-startAngle)*ease); if (e<1) requestAnimationFrame(run); };
+    requestAnimationFrame(run);
   };
 
-  // poll global spin state
+  const loadMe = async () => {
+    const r = await fetch('/api/me');
+    if (r.ok) { const j = await r.json(); setMe(j); setBalance(j.balance||0); } else setMe(null);
+  };
   const loadState = async () => {
     const r = await fetch('/api/spin/state');
     const j = await r.json();
     setState(j);
     if (j.status !== 'IDLE' && j.segments?.length) setSegments(j.segments);
-    if (j.status === 'RESULT' && typeof j.resultIndex === 'number') {
-      // animate to show the result (everyone sees it!)
-      animateTo(j.resultIndex, j.segments || []);
-    }
+    if (j.status === 'RESULT' && typeof j.resultIndex === 'number') animateTo(j.resultIndex, j.segments||[]);
   };
 
-  useEffect(() => { loadMe(); }, []);
-  useEffect(() => {
-    draw(angle, segments);
-  }, [angle, segments]);
-
-  useEffect(() => {
-    loadState();
-    const id = setInterval(loadState, 1200); // every ~1.2s
-    return () => clearInterval(id);
-  }, []);
-
-  const animateTo = (idx, segs) => {
-    if (!segs.length) return;
-    const n = segs.length; const step = 2*Math.PI/n; const target = (Math.PI/2)-(idx*step+step/2);
-    const turns = 6; const final = target + turns*2*Math.PI; const start = performance.now(); const duration = 4000; const startAngle = angle%(2*Math.PI);
-    const run = (t) => { const e = Math.min(1,(t-start)/duration); const ease = 1-Math.pow(1-e,3); setAngle(startAngle+(final-startAngle)*ease); if (e<1) requestAnimationFrame(run); };
-    requestAnimationFrame(run);
-  };
+  useEffect(()=>{ loadMe(); },[]);
+  useEffect(()=>{ draw(angle, segments); },[angle, segments]);
+  useEffect(()=>{ loadState(); const id=setInterval(loadState,1200); return ()=>clearInterval(id); },[]);
 
   const spin = async () => {
-    setErr(''); setMessage('');
+    setErr(''); setPopup(null);
     if (!me) { setErr('Please login at /login'); return; }
-    if (state.status !== 'IDLE' && state.username !== me.username) {
-      setErr(`Busy: ${state.username} is spinning`);
-      return;
-    }
+    if (state.status !== 'IDLE' && state.username !== me.username) { setErr(`Busy: ${state.username} is spinning`); return; }
     setSpinning(true);
     const r = await fetch('/api/spin', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ wager }) });
     const j = await r.json();
-    if (!r.ok) { setErr(j.error || 'error'); setSpinning(false); return; }
-    setSegments(j.segments || []);
-    animateTo(j.resultIndex, j.segments || []);
-    // message + balance
-    if (j.result?.type === 'item') setMessage(`You won item: ${j.result.name}`);
-    if (j.result?.type === 'coins') setMessage(`You won +${j.result.amount} coins!`);
-    if (j.result?.type === 'another_spin') setMessage(`Another spin (no prize).`);
-    setBalance(j.balance || 0);
+    if (!r.ok) { setErr(j.error||'error'); setSpinning(false); return; }
+    setSegments(j.segments||[]);
+    animateTo(j.resultIndex, j.segments||[]);
+    setBalance(j.balance||0);
     setSpinning(false);
 
-    // release lock (only spinner can)
-    await fetch('/api/spin/reset', { method: 'POST' });
+    // POPUP (Uzbek message with image)
+    if (j.result?.type === 'item') {
+      setPopup({ text: `'${j.username}' siz '${j.result.name}' yutib oldingiz🎉`, imageUrl: j.result.imageUrl || null });
+    } else if (j.result?.type === 'coins') {
+      setPopup({ text: `'${j.username}' siz +${j.result.amount} tangalarni yutib oldingiz🎉`, imageUrl: null });
+    } else {
+      setPopup({ text: `'${j.username}' uchun yana bir aylantirish!`, imageUrl: null });
+    }
+
+    await fetch('/api/spin/reset', { method:'POST' });
     await loadState();
   };
 
@@ -127,8 +117,19 @@ export default function WheelPage() {
       </div>
       <canvas ref={canvasRef} style={{ borderRadius:'9999px', boxShadow:'0 10px 30px rgba(0,0,0,0.12)' }} />
       {err && <div style={{color:'red'}}>{err}</div>}
-      {message && <div>{message}</div>}
       <p><a href="/">← Home</a></p>
+
+      {/* POPUP */}
+      {popup && (
+        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:50}}
+             onClick={()=>setPopup(null)}>
+          <div style={{background:'white', padding:20, borderRadius:12, maxWidth:320, textAlign:'center'}} onClick={(e)=>e.stopPropagation()}>
+            {popup.imageUrl && <img src={popup.imageUrl} alt="prize" style={{width:'100%', borderRadius:8, marginBottom:12}}/>}
+            <div style={{fontWeight:700, marginBottom:8}}>{popup.text}</div>
+            <button onClick={()=>setPopup(null)} style={{padding:'8px 12px', borderRadius:8, background:'black', color:'white'}}>OK</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
