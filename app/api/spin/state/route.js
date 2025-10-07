@@ -33,7 +33,8 @@ export async function GET() {
   return NextResponse.json(
     {
       status: s.status,
-      username: s.username || null,
+      userId: s.userId || null,         // NEW
+      username: s.username || null,     // this is *display* name
       wager: s.wager || null,
       segments: s.segments || [],
       resultIndex: s.resultIndex ?? null,
