@@ -56,3 +56,11 @@ model SpinState {
   resultIndex Int?
   updatedAt   DateTime @updatedAt
 }
+model SpinLog {
+  id        String   @id @default(cuid())
+  userId    String
+  username  String
+  wager     Int
+  prize     String
+  createdAt DateTime @default(now())
+}
