@@ -1,10 +1,11 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 export default function AdminItems() {
   const [items, setItems] = useState([]);
   const [err, setErr] = useState('');
   const [form, setForm] = useState({ name:'', tier:'50', imageUrl:'' });
+  const fileRef = useRef(null);
 
   const load = async () => {
     const r = await fetch('/api/admin/items');
@@ -13,20 +14,40 @@ export default function AdminItems() {
   };
   useEffect(()=>{ load(); },[]);
 
+  const uploadFile = async (file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch('/api/upload', { method:'POST', body: fd });
+    if (!r.ok) throw new Error('upload failed');
+    const j = await r.json();
+    return j.url;
+  };
+
   const add = async (e) => {
     e.preventDefault(); setErr('');
+    let imageUrl = form.imageUrl || '';
+    const f = fileRef.current?.files?.[0];
+    if (f) imageUrl = await uploadFile(f);
+
     const r = await fetch('/api/admin/items', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ name: form.name, tier: Number(form.tier), imageUrl: form.imageUrl || null })
+      body: JSON.stringify({ name: form.name, tier: Number(form.tier), imageUrl: imageUrl || null })
     });
     if (!r.ok) { const j = await r.json(); setErr(j.error||'error'); return; }
-    setForm({ name:'', tier:'50', imageUrl:'' }); load();
+    setForm({ name:'', tier:'50', imageUrl:'' });
+    if (fileRef.current) fileRef.current.value = '';
+    load();
   };
 
   const update = async (id, data) => {
     await fetch(`/api/admin/items/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) });
     load();
+  };
+
+  const handleRowUpload = async (id, file) => {
+    const url = await uploadFile(file);
+    await update(id, { imageUrl: url });
   };
 
   return (
@@ -40,7 +61,8 @@ export default function AdminItems() {
           <option value="200">200</option>
           <option value="500">500 (grand prize)</option>
         </select>
-        <input value={form.imageUrl} onChange={e=>setForm({...form,imageUrl:e.target.value})} placeholder="image URL (https://...)" style={{padding:8, width:260}}/>
+        <input value={form.imageUrl} onChange={e=>setForm({...form,imageUrl:e.target.value})} placeholder="or paste image URL (optional)" style={{padding:8, width:260}}/>
+        <input type="file" ref={fileRef} accept="image/*" />
         <button style={{padding:'8px 12px',background:'black',color:'white',borderRadius:8}}>Add</button>
       </form>
       {err && <div style={{color:'red'}}>{err}</div>}
@@ -54,13 +76,17 @@ export default function AdminItems() {
               <td>{it.name}</td>
               <td>{it.tier}</td>
               <td>{String(it.isActive)}</td>
-              <td style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              <td style={{display:'flex',gap:8,flexWrap:'wrap', alignItems:'center'}}>
                 <button onClick={()=>update(it.id, { tier:50 })}>Set 50</button>
                 <button onClick={()=>update(it.id, { tier:100 })}>Set 100</button>
                 <button onClick={()=>update(it.id, { tier:200 })}>Set 200</button>
                 <button onClick={()=>update(it.id, { tier:500 })}>Set 500</button>
                 <button onClick={()=>update(it.id, { isActive: !it.isActive })}>{it.isActive?'Deactivate':'Activate'}</button>
-                <button onClick={()=>{ const url=prompt('New image URL', it.imageUrl||''); if(url!==null) update(it.id,{ imageUrl:url }); }}>Set image</button>
+                <label style={{cursor:'pointer'}}>
+                  <input type="file" accept="image/*" style={{display:'none'}}
+                         onChange={(e)=>{ const f=e.target.files?.[0]; if(f) handleRowUpload(it.id, f); }} />
+                  Upload image
+                </label>
               </td>
             </tr>
           ))}
