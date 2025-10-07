@@ -19,20 +19,14 @@ export default function WheelPage() {
   const [balance, setBalance] = useState(0);
   const [segments, setSegments] = useState([]);
   const [err, setErr] = useState('');
-  const [state, setState] = useState({ status: 'IDLE', username: null, resultIndex: null, segments: [] });
+  const [state, setState] = useState({ status: 'IDLE', userId: null, username: null, resultIndex: null, segments: [] });
   const [me, setMe] = useState(null);
 
-  // popup after stop
-  const [popup, setPopup] = useState(null); // { text, imageUrl }
-
-  // items dropdown
+  const [popup, setPopup] = useState(null);
   const [showList, setShowList] = useState(false);
   const [allItems, setAllItems] = useState([]);
-
-  // prevent re-starting the same animation
   const currentSpinKey = useRef(null);
 
-  // ---------- drawing ----------
   const draw = (a, segs) => {
     const canvas = canvasRef.current; if (!canvas) return;
     const size = 360; const dpr = window.devicePixelRatio || 1;
@@ -48,66 +42,42 @@ export default function WheelPage() {
       ctx.fillText(label(s[i]), r*0.65, 6); ctx.restore();
     }
     ctx.restore();
-    // top pointer
     ctx.beginPath(); ctx.moveTo(cx, 8); ctx.lineTo(cx-12, 28); ctx.lineTo(cx+12, 28); ctx.closePath(); ctx.fillStyle='#ef4444'; ctx.fill();
   };
   useEffect(()=>{ draw(angle, segments); },[angle, segments]);
 
-  // ---------- helpers ----------
   const getMe = async () => {
-    const r = await fetch('/api/me');
-    if (!r.ok) { setMe(null); return false; }
+    const r = await fetch('/api/me'); if (!r.ok) { setMe(null); return false; }
     const j = await r.json(); setMe(j); setBalance(j.balance||0); return true;
   };
   const getSegments = async (w) => {
-    const r = await fetch(`/api/segments?tier=${w}`);
-    const j = await r.json();
+    const r = await fetch(`/api/segments?tier=${w}`); const j = await r.json();
     if (j.segments) setSegments(j.segments);
   };
-  const getAllItems = async () => {
-    const r = await fetch('/api/items/all'); setAllItems(await r.json());
-  };
+  const getAllItems = async () => { const r = await fetch('/api/items/all'); setAllItems(await r.json()); };
 
-  // -------- Telegram auto-login on open --------
   const ensureTelegramAutoLogin = async () => {
-    // already logged in?
-    const ok = await getMe();
-    if (ok) return true;
-
-    // load Telegram SDK if available
+    const ok = await getMe(); if (ok) return true;
     const loadSdk = () => new Promise((resolve)=> {
       if (window.Telegram?.WebApp) return resolve();
-      const s = document.createElement('script');
-      s.src = 'https://telegram.org/js/telegram-web-app.js';
-      s.onload = resolve;
-      s.onerror = resolve; // ignore errors outside Telegram
-      document.head.appendChild(s);
+      const s = document.createElement('script'); s.src = 'https://telegram.org/js/telegram-web-app.js';
+      s.onload = resolve; s.onerror = resolve; document.head.appendChild(s);
     });
     await loadSdk();
-
     const tg = window.Telegram?.WebApp;
-    if (!tg || !tg.initData) return false; // not inside Telegram
-
+    if (!tg || !tg.initData) return false;
     try {
       tg.expand?.();
-      const r = await fetch('/api/telegram/auth', {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ initData: tg.initData }) // signed string
-      });
+      const r = await fetch('/api/telegram/auth', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ initData: tg.initData }) });
       if (!r.ok) return false;
-      await getMe(); // refresh me/balance after auth
+      await getMe();
       return true;
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   };
 
-  // ---------- live spin sync ----------
   const startSharedSpin = (spin) => {
     if (!spin || !spin.segments?.length || typeof spin.resultIndex !== 'number' || !spin.spinStartAt) return;
-
-    const key = `${spin.username}-${spin.resultIndex}-${spin.spinStartAt}`;
+    const key = `${spin.userId}-${spin.resultIndex}-${spin.spinStartAt}`;
     if (currentSpinKey.current === key) return;
     currentSpinKey.current = key;
 
@@ -150,47 +120,36 @@ export default function WheelPage() {
     if (j.status === 'SPINNING') startSharedSpin(j);
   };
 
-  // ---------- mount ----------
   useEffect(() => {
     (async () => {
-      await ensureTelegramAutoLogin();   // auto-login if opened inside Telegram
-      await getSegments(wager);          // initial wheel slices
-      await pollState();                 // start live sync
+      await ensureTelegramAutoLogin();
+      await getSegments(wager);
+      await pollState();
       const id = setInterval(pollState, 1000);
       return () => { clearInterval(id); if (rafRef.current) cancelAnimationFrame(rafRef.current); };
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------- UI actions ----------
   const changeWager = (w) => { setWager(w); getSegments(w); };
 
   const spin = async () => {
     setErr(''); setPopup(null);
-
-    // make sure we’re logged in (works for both normal web & Telegram)
     const authed = await getMe();
     if (!authed) {
       const ok = await ensureTelegramAutoLogin();
       if (!ok) { setErr('Iltimos, /login orqali kiring'); return; }
     }
 
-    // hard lock check (server also enforces)
-    if (state.status === 'SPINNING' && state.username && state.username !== me?.username) {
+    if (state.status === 'SPINNING' && state.userId && state.userId !== me?.id) {
       setErr(`Band: hozir ${state.username} aylanmoqda`);
       return;
     }
 
     setSpinning(true);
-    const r = await fetch('/api/spin', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ wager })
-    });
+    const r = await fetch('/api/spin', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ wager }) });
     const j = await r.json();
     if (!r.ok) { setErr(j.error||'xato'); setSpinning(false); return; }
-
-    // start the shared animation immediately for spinner too
     startSharedSpin(j);
     setBalance(j.balance || 0);
     setSpinning(false);
@@ -201,7 +160,6 @@ export default function WheelPage() {
       <h2 style={{ fontSize:24, fontWeight:600 }}>Wheel</h2>
       <div>Balance: <b>{balance}</b> coins</div>
 
-      {/* Wager buttons */}
       <div style={{display:'flex', gap:8, marginTop:8}}>
         <button onClick={()=>changeWager(50)}  disabled={spinning} style={{padding:'8px 12px', borderRadius:8, border:'1px solid #ddd', background: wager===50?'#111':'#fff', color:wager===50?'#fff':'#111'}}>50 tanga</button>
         <button onClick={()=>changeWager(100)} disabled={spinning} style={{padding:'8px 12px', borderRadius:8, border:'1px solid #ddd', background: wager===100?'#111':'#fff', color:wager===100?'#fff':'#111'}}>100 tanga</button>
@@ -218,12 +176,11 @@ export default function WheelPage() {
 
       <button
         onClick={spin}
-        disabled={spinning || (state.status==='SPINNING' && state.username !== me?.username)}
+        disabled={spinning || (state.status==='SPINNING' && state.userId && state.userId !== me?.id)}
         style={{ padding:'10px 16px', borderRadius:12, background:'black', color:'white', opacity: spinning?0.5:1 }}>
         {spinning ? 'Aylanyapti…' : `Spin (-${wager})`}
       </button>
 
-      {/* Show all items dropdown */}
       <div style={{marginTop:8, width:360}}>
         <button onClick={()=>{ setShowList(!showList); if(!allItems.length) getAllItems(); }} style={{width:'100%', padding:'8px 12px', borderRadius:8, border:'1px solid #ddd', background:'#fff'}}>
           Barcha sovg‘alar (narxlari bilan) {showList ? '▲' : '▼'}
@@ -244,7 +201,6 @@ export default function WheelPage() {
         )}
       </div>
 
-      {/* POPUP after stop */}
       {popup && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:50}}
              onClick={()=>setPopup(null)}>
@@ -257,6 +213,7 @@ export default function WheelPage() {
       )}
 
       <p><a href="/">← Home</a></p>
+      {err && <div style={{color:'red', marginTop:8}}>{err}</div>}
     </div>
   );
 }
