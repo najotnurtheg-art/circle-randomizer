@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 import { requireUser } from '@/app/lib/auth';
@@ -21,29 +24,30 @@ export async function POST(req) {
   const W = Number(wager);
   if (!TIERS.includes(W)) return NextResponse.json({ error: 'wager must be 50/100/200' }, { status: 400 });
 
-  // ensure state row exists
+  // Ensure state row exists
   let state = await prisma.spinState.findUnique({ where: { id: 'global' } });
   if (!state) state = await prisma.spinState.create({ data: { id: 'global', status: 'IDLE' } });
 
-  if (state.status !== 'IDLE' && state.userId !== me.sub) {
-    return NextResponse.json({ error: `busy: ${state.username} is spinning` }, { status: 409 });
+  // STRICT lock: if SPINNING, nobody can start a new spin (even the same user)
+  if (state.status !== 'IDLE') {
+    return NextResponse.json({ error: `busy: ${state.username || 'another user'} is spinning` }, { status: 409 });
   }
 
-  // balance check
+  // Balance check
   const wallet = await prisma.wallet.findUnique({ where: { userId: me.sub } });
   if (!wallet || wallet.balance < W) return NextResponse.json({ error: 'insufficient_funds' }, { status: 400 });
 
-  // items for this tier
+  // Items for this tier
   const items = await prisma.item.findMany({
     where: { tier: tierKey(W), isActive: true },
     orderBy: { createdAt: 'desc' }
   });
 
-  // next-tier random item
+  // Next-tier random item
   const nextItems = await prisma.item.findMany({ where: { tier: tierKey(nextTier(W)), isActive: true } });
   const randomNext = nextItems.length ? nextItems[Math.floor(Math.random() * nextItems.length)] : null;
 
-  // 500 grand prize inside 200
+  // 500 grand prize inside 200-spin
   let grandPrize = null;
   if (W === 200) {
     const gp = await prisma.item.findMany({ where: { tier: 'T500', isActive: true } });
@@ -60,26 +64,38 @@ export async function POST(req) {
 
   if (!segments.length) return NextResponse.json({ error: 'no items for this tier yet' }, { status: 400 });
 
-  // debit + lock
+  // Decide result now (shared)
+  const idx = Math.floor(Math.random() * segments.length);
+  const result = segments[idx];
+
+  // 10s spin timing
+  const durationMs = 10000;
+  const spinStartAt = new Date();
+
+  // Debit + lock
   await prisma.$transaction(async (tx) => {
     await tx.wallet.update({ where: { userId: me.sub }, data: { balance: { decrement: W } } });
     await tx.spinState.update({
       where: { id: 'global' },
-      data: { status: 'SPINNING', userId: me.sub, username: me.username, wager: W, segments }
+      data: {
+        status: 'SPINNING',
+        userId: me.sub,
+        username: me.username,
+        wager: W,
+        segments,
+        resultIndex: idx,
+        spinStartAt,
+        durationMs
+      }
     });
   });
 
-  // RNG
-  const idx = Math.floor(Math.random() * segments.length);
-  const result = segments[idx];
-
-  // payout if coins
+  // Coins payout immediately
   if (result.type === 'coins') {
     await prisma.wallet.update({ where: { userId: me.sub }, data: { balance: { increment: result.amount } } });
   }
 
-  // save RESULT + log
-  await prisma.spinState.update({ where: { id: 'global' }, data: { status: 'RESULT', resultIndex: idx } });
+  // Log reward
   await prisma.spinLog.create({
     data: { userId: me.sub, username: me.username, wager: W, prize: prizeText(result) }
   });
@@ -87,11 +103,13 @@ export async function POST(req) {
   const bal = await prisma.wallet.findUnique({ where: { userId: me.sub } });
 
   return NextResponse.json({
-    status: 'RESULT',
+    status: 'SPINNING',
     username: me.username,
     segments,
     resultIndex: idx,
-    result,
+    spinStartAt,
+    durationMs,
+    result,     // clients must only show after wheel stops
     balance: bal?.balance ?? 0
-  });
+  }, { headers: { 'Cache-Control': 'no-store' } });
 }
