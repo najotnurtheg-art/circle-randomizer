@@ -7,7 +7,7 @@ export default function AdminUsers() {
   const [q, setQ] = useState('');
 
   const load = async () => {
-    const r = await fetch('/api/admin/users');
+    const r = await fetch('/api/admin/users', { cache: 'no-store' });
     if (!r.ok) { setErr('Admin only'); return; }
     setRows(await r.json());
   };
@@ -19,9 +19,22 @@ export default function AdminUsers() {
     if (!needle) return rows;
     return rows.filter(r =>
       r.username.toLowerCase().includes(needle) ||
+      r.displayName.toLowerCase().includes(needle) ||
       (r.role||'').toLowerCase().includes(needle)
     );
   }, [rows, q]);
+
+  const rename = async (id, current) => {
+    const name = prompt('New display name:', current || '');
+    if (name === null) return;
+    const r = await fetch(`/api/admin/users/${id}`, {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ displayName: name })
+    });
+    if (!r.ok) { alert('Failed to rename'); return; }
+    load();
+  };
 
   return (
     <div style={{padding:24, fontFamily:'system-ui, sans-serif'}}>
@@ -29,28 +42,32 @@ export default function AdminUsers() {
       {err && <div style={{color:'red'}}>{err}</div>}
 
       <div style={{margin:'12px 0', display:'flex', gap:8}}>
-        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search username / role" style={{padding:8, flex:1}}/>
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search by display/username/role" style={{padding:8, flex:1}}/>
         <button onClick={load}>Refresh</button>
       </div>
 
       <table border="1" cellPadding="6" style={{borderCollapse:'collapse', width:'100%'}}>
         <thead>
           <tr>
-            <th>Username</th>
+            <th>Display Name</th>
+            <th>Username (login)</th>
             <th>Role</th>
             <th>Balance</th>
             <th>Joined</th>
-            <th>User ID</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {filtered.map(u=>(
             <tr key={u.id}>
+              <td>{u.displayName}</td>
               <td>{u.username}</td>
               <td>{u.role}</td>
               <td>{u.balance}</td>
               <td>{new Date(u.createdAt).toLocaleString()}</td>
-              <td style={{fontFamily:'monospace', fontSize:12}}>{u.id}</td>
+              <td>
+                <button onClick={()=>rename(u.id, u.displayName)}>Rename</button>
+              </td>
             </tr>
           ))}
         </tbody>
