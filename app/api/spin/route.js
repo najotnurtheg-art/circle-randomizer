@@ -6,10 +6,10 @@ const TIERS = [50, 100, 200];
 const nextTier = (v) => (v === 50 ? 100 : v === 100 ? 200 : 50);
 const tierKey  = (v) => (v === 50 ? 'T50' : v === 100 ? 'T100' : 'T200');
 
-function buildLabel(seg) {
+function prizeText(seg){
   if (!seg) return '';
   if (seg.type === 'item') return seg.name;
-  if (seg.type === 'coins') return `+${seg.amount} coins`;
+  if (seg.type === 'coins') return `Coins +${seg.amount}`;
   return 'Another spin';
 }
 
@@ -33,7 +33,7 @@ export async function POST(req) {
   const wallet = await prisma.wallet.findUnique({ where: { userId: me.sub } });
   if (!wallet || wallet.balance < W) return NextResponse.json({ error: 'insufficient_funds' }, { status: 400 });
 
-  // base items for this tier
+  // items for this tier
   const items = await prisma.item.findMany({
     where: { tier: tierKey(W), isActive: true },
     orderBy: { createdAt: 'desc' }
@@ -43,7 +43,7 @@ export async function POST(req) {
   const nextItems = await prisma.item.findMany({ where: { tier: tierKey(nextTier(W)), isActive: true } });
   const randomNext = nextItems.length ? nextItems[Math.floor(Math.random() * nextItems.length)] : null;
 
-  // GRAND PRIZE (T500) only in 200 spin
+  // 500 grand prize inside 200
   let grandPrize = null;
   if (W === 200) {
     const gp = await prisma.item.findMany({ where: { tier: 'T500', isActive: true } });
@@ -51,12 +51,12 @@ export async function POST(req) {
   }
 
   const segments = [
-    ...items.map(i => ({ type: 'item', name: i.name, tier: W, imageUrl: i.imageUrl || null })),
-    { type: 'another_spin' },
-    { type: 'coins', amount: nextTier(W) },
+    ...items.map(i => ({ type:'item', name:i.name, tier:W, imageUrl:i.imageUrl||null })),
+    { type:'another_spin' },
+    { type:'coins', amount: nextTier(W) },
   ];
-  if (randomNext) segments.push({ type: 'item', name: randomNext.name, tier: nextTier(W), imageUrl: randomNext.imageUrl || null });
-  if (grandPrize) segments.push({ type: 'item', name: grandPrize.name, tier: 500, imageUrl: grandPrize.imageUrl || null, grand: true });
+  if (randomNext) segments.push({ type:'item', name:randomNext.name, tier:nextTier(W), imageUrl:randomNext.imageUrl||null });
+  if (grandPrize) segments.push({ type:'item', name:grandPrize.name, tier:500, imageUrl:grandPrize.imageUrl||null, grand:true });
 
   if (!segments.length) return NextResponse.json({ error: 'no items for this tier yet' }, { status: 400 });
 
@@ -78,7 +78,12 @@ export async function POST(req) {
     await prisma.wallet.update({ where: { userId: me.sub }, data: { balance: { increment: result.amount } } });
   }
 
+  // save RESULT + log
   await prisma.spinState.update({ where: { id: 'global' }, data: { status: 'RESULT', resultIndex: idx } });
+  await prisma.spinLog.create({
+    data: { userId: me.sub, username: me.username, wager: W, prize: prizeText(result) }
+  });
+
   const bal = await prisma.wallet.findUnique({ where: { userId: me.sub } });
 
   return NextResponse.json({
@@ -87,7 +92,6 @@ export async function POST(req) {
     segments,
     resultIndex: idx,
     result,
-    balance: bal?.balance ?? 0,
-    labels: segments.map(buildLabel),
+    balance: bal?.balance ?? 0
   });
 }
