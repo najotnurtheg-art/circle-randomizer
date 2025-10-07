@@ -47,8 +47,8 @@ model Item {
   updatedAt DateTime  @updatedAt
 }
 model SpinState {
-  id          String   @id @default("global") // single row, id = "global"
-  status      String   @default("IDLE")       // IDLE | SPINNING | RESULT
+  id          String   @id @default("global")
+  status      String   @default("IDLE") // IDLE | SPINNING | RESULT
   userId      String?
   username    String?
   wager       Int?
