@@ -21,7 +21,7 @@ export default function WheelPage() {
   const [state, setState] = useState({ status: 'IDLE', username: null, resultIndex: null, segments: [] });
   const [me, setMe] = useState(null);
 
-  // WIN POPUP
+  // Win popup
   const [popup, setPopup] = useState(null); // { text, imageUrl }
 
   const draw = (a, segs) => {
@@ -46,7 +46,7 @@ export default function WheelPage() {
   const animateTo = (idx, segs) => {
     if (!segs.length) return;
     const n = segs.length; const step = 2*Math.PI/n;
-    const target = TOP_ANGLE - (idx*step + step/2); // FIXED: top pointer
+    const target = TOP_ANGLE - (idx*step + step/2); // FIX: top pointer
     const turns = 6; const final = target + turns*2*Math.PI;
     const start = performance.now(); const duration = 4000;
     const startAngle = angle%(2*Math.PI);
@@ -83,7 +83,7 @@ export default function WheelPage() {
     setBalance(j.balance||0);
     setSpinning(false);
 
-    // POPUP (Uzbek message with image)
+    // POPUP (Uzbek)
     if (j.result?.type === 'item') {
       setPopup({ text: `'${j.username}' siz '${j.result.name}' yutib oldingiz🎉`, imageUrl: j.result.imageUrl || null });
     } else if (j.result?.type === 'coins') {
