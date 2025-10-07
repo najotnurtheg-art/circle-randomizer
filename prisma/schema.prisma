@@ -17,7 +17,6 @@ enum PriceTier {
   T100
   T200
   T500
-
 }
 
 model User {
@@ -30,11 +29,11 @@ model User {
 }
 
 model Wallet {
-  id        String  @id @default(cuid())
-  userId    String  @unique
-  balance   Int     @default(0)
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  balance   Int      @default(0)
   updatedAt DateTime @updatedAt
-  user      User    @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
 }
 
 model Item {
@@ -42,20 +41,24 @@ model Item {
   name      String
   tier      PriceTier
   isActive  Boolean   @default(true)
-  imageUrl  String?   // NEW
+  imageUrl  String?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 }
+
 model SpinState {
-  id          String   @id @default("global")
-  status      String   @default("IDLE") // IDLE | SPINNING | RESULT
+  id          String   @id @default("global") // single row
+  status      String   @default("IDLE")       // IDLE | SPINNING
   userId      String?
   username    String?
   wager       Int?
   segments    Json?
   resultIndex Int?
+  spinStartAt DateTime?
+  durationMs  Int?
   updatedAt   DateTime @updatedAt
 }
+
 model SpinLog {
   id        String   @id @default(cuid())
   userId    String
