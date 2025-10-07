@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 
-const TOP_ANGLE = -Math.PI/2; // pointer is at top
+const TOP_ANGLE = -Math.PI/2; // pointer at top
 
 function label(seg) {
   if (!seg) return '';
@@ -12,6 +12,7 @@ function label(seg) {
 
 export default function WheelPage() {
   const canvasRef = useRef(null);
+  const rafRef = useRef(null);
   const [angle, setAngle] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [wager, setWager] = useState(50);
@@ -21,12 +22,15 @@ export default function WheelPage() {
   const [state, setState] = useState({ status: 'IDLE', username: null, resultIndex: null, segments: [] });
   const [me, setMe] = useState(null);
 
-  // Popup after stop
+  // popup after stop
   const [popup, setPopup] = useState(null); // { text, imageUrl }
 
-  // Items dropdown
+  // items dropdown
   const [showList, setShowList] = useState(false);
   const [allItems, setAllItems] = useState([]);
+
+  // to not restart same animation
+  const currentSpinKey = useRef(null);
 
   const draw = (a, segs) => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -47,78 +51,113 @@ export default function WheelPage() {
     ctx.beginPath(); ctx.moveTo(cx, 8); ctx.lineTo(cx-12, 28); ctx.lineTo(cx+12, 28); ctx.closePath(); ctx.fillStyle='#ef4444'; ctx.fill();
   };
 
-  const animateTo = (idx, segs, onDone) => {
-    if (!segs.length) return;
-    const n = segs.length; const step = 2*Math.PI/n;
-    const target = TOP_ANGLE - (idx*step + step/2);
-    const turns = 6; // visual cycles
-    const final = target + turns*2*Math.PI;
-    const start = performance.now(); const duration = 10000; // 10 seconds
-    const startAngle = angle%(2*Math.PI);
-    const run = (t) => {
-      const e = Math.min(1,(t-start)/duration);
-      const ease = 1-Math.pow(1-e,3);
-      setAngle(startAngle+(final-startAngle)*ease);
-      if (e<1) requestAnimationFrame(run); else if (onDone) onDone();
-    };
-    requestAnimationFrame(run);
+  useEffect(()=>{ draw(angle, segments); },[angle, segments]);
+
+  const getMe = async () => {
+    const r = await fetch('/api/me'); if (!r.ok) { setMe(null); return; }
+    const j = await r.json(); setMe(j); setBalance(j.balance||0);
   };
 
-  const loadMe = async () => {
-    const r = await fetch('/api/me');
-    if (r.ok) { const j = await r.json(); setMe(j); setBalance(j.balance||0); } else setMe(null);
-  };
-  const loadState = async () => {
-    const r = await fetch('/api/spin/state');
-    const j = await r.json();
-    setState(j);
-    if (j.status !== 'IDLE' && j.segments?.length) setSegments(j.segments);
-    if (j.status === 'RESULT' && typeof j.resultIndex === 'number') {
-      animateTo(j.resultIndex, j.segments||[]);
-    }
-  };
-  const loadSegments = async (w) => {
+  const getSegments = async (w) => {
     const r = await fetch(`/api/segments?tier=${w}`);
     const j = await r.json();
     if (j.segments) setSegments(j.segments);
   };
-  const loadAllItems = async () => {
-    const r = await fetch('/api/items/all');
-    setAllItems(await r.json());
+
+  const getAllItems = async () => {
+    const r = await fetch('/api/items/all'); setAllItems(await r.json());
   };
 
-  useEffect(()=>{ loadMe(); loadSegments(wager); },[]);
-  useEffect(()=>{ draw(angle, segments); },[angle, segments]);
-  useEffect(()=>{ loadState(); const id=setInterval(loadState,1200); return ()=>clearInterval(id); },[]);
+  // shared animation based on server state
+  const startSharedSpin = (spin) => {
+    if (!spin || !spin.segments?.length || typeof spin.resultIndex !== 'number' || !spin.spinStartAt) return;
+
+    // build a unique key so we don't restart
+    const key = `${spin.username}-${spin.resultIndex}-${spin.spinStartAt}`;
+    if (currentSpinKey.current === key) return;
+    currentSpinKey.current = key;
+
+    setSegments(spin.segments); // show same slices
+    const n = spin.segments.length;
+    const step = 2 * Math.PI / n;
+    const target = TOP_ANGLE - (spin.resultIndex * step + step / 2);
+    const turns = 6; // visual cycles
+    const final = target + turns * 2 * Math.PI;
+    const duration = Number(spin.durationMs || 10000);
+    const startAtMs = new Date(spin.spinStartAt).getTime();
+    const startAngle = angle % (2 * Math.PI);
+
+    // align to server start time
+    const perfOffset = Math.max(0, Date.now() - startAtMs);
+    const startPerf = performance.now() - perfOffset;
+
+    // cancel existing RAF
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+
+    const run = (t) => {
+      const elapsed = t - startPerf;
+      const e = Math.min(1, elapsed / duration);
+      const ease = 1 - Math.pow(1 - e, 3);
+      setAngle(startAngle + (final - startAngle) * ease);
+      if (e < 1) {
+        rafRef.current = requestAnimationFrame(run);
+      } else {
+        rafRef.current = null;
+        // after stop, show popup for watchers too
+        const seg = spin.segments[spin.resultIndex];
+        if (seg?.type === 'item') setPopup({ text: `'${spin.username}' siz '${seg.name}' yutib oldingiz🎉`, imageUrl: seg.imageUrl || null });
+        else if (seg?.type === 'coins') setPopup({ text: `'${spin.username}' siz +${seg.amount} tangalarni yutib oldingiz🎉`, imageUrl: null });
+        else setPopup({ text: `'${spin.username}' uchun yana bir aylantirish!`, imageUrl: null });
+      }
+    };
+    rafRef.current = requestAnimationFrame(run);
+  };
+
+  const pollState = async () => {
+    const r = await fetch('/api/spin/state', { cache: 'no-store' });
+    const j = await r.json();
+    setState(j);
+    if (j.status === 'SPINNING') startSharedSpin(j);
+  };
+
+  useEffect(() => {
+    getMe();
+    getSegments(wager);
+    pollState();
+    const id = setInterval(pollState, 1000); // 1s polling is enough
+    return () => { clearInterval(id); if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const changeWager = (w) => {
     setWager(w);
-    loadSegments(w);
+    getSegments(w);
   };
 
   const spin = async () => {
     setErr(''); setPopup(null);
-    if (!me) { setErr('Iltimos, /login orqali kiring'); return; }
-    if (state.status !== 'IDLE' && state.username !== me.username) { setErr(`Band: hozir ${state.username} aylantirmoqda`); return; }
+    const meR = await fetch('/api/me'); if (!meR.ok) { setErr('Iltimos, /login orqali kiring'); return; }
+    const meJ = await meR.json(); setMe(meJ);
+
+    // check lock on client (server also enforces)
+    if (state.status === 'SPINNING' && state.username && state.username !== meJ.username) {
+      setErr(`Band: hozir ${state.username} aylanmoqda`);
+      return;
+    }
+
     setSpinning(true);
-    const r = await fetch('/api/spin', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ wager }) });
+    const r = await fetch('/api/spin', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ wager })
+    });
     const j = await r.json();
     if (!r.ok) { setErr(j.error||'xato'); setSpinning(false); return; }
-    setSegments(j.segments||[]);
-    // show reward ONLY after animation ends
-    animateTo(j.resultIndex, j.segments||[], () => {
-      if (j.result?.type === 'item') {
-        setPopup({ text: `'${j.username}' siz '${j.result.name}' yutib oldingiz🎉`, imageUrl: j.result.imageUrl || null });
-      } else if (j.result?.type === 'coins') {
-        setPopup({ text: `'${j.username}' siz +${j.result.amount} tangalarni yutib oldingiz🎉`, imageUrl: null });
-      } else {
-        setPopup({ text: `'${j.username}' uchun yana bir aylantirish!`, imageUrl: null });
-      }
-      setBalance(j.balance||0);
-      setSpinning(false);
-    });
-    await fetch('/api/spin/reset', { method:'POST' });
-    await loadState();
+
+    // start the same shared animation immediately
+    startSharedSpin(j);
+    setBalance(j.balance || 0);
+    setSpinning(false);
   };
 
   return (
@@ -134,19 +173,23 @@ export default function WheelPage() {
       </div>
 
       <div>
-        {state.status === 'SPINNING' && <b>Hozir: {state.username} aylanmoqda</b>}
-        {state.status === 'RESULT' && <span> Oxirgi: <b>{state.username}</b></span>}
+        {state.status === 'SPINNING'
+          ? <b>Hozir: {state.username} aylanmoqda</b>
+          : <span>Keyingi o‘yinchi tayyor!</span>}
       </div>
 
       <canvas ref={canvasRef} style={{ borderRadius:'9999px', boxShadow:'0 10px 30px rgba(0,0,0,0.12)' }} />
 
-      <button onClick={spin} disabled={spinning || (state.status!=='IDLE' && state.username !== me?.username)} style={{ padding:'10px 16px', borderRadius:12, background:'black', color:'white', opacity: spinning?0.5:1 }}>
+      <button
+        onClick={spin}
+        disabled={spinning || (state.status==='SPINNING' && state.username !== me?.username)}
+        style={{ padding:'10px 16px', borderRadius:12, background:'black', color:'white', opacity: spinning?0.5:1 }}>
         {spinning ? 'Aylanyapti…' : `Spin (-${wager})`}
       </button>
 
       {/* Show all items dropdown */}
       <div style={{marginTop:8, width:360}}>
-        <button onClick={()=>{ setShowList(!showList); if(!allItems.length) loadAllItems(); }} style={{width:'100%', padding:'8px 12px', borderRadius:8, border:'1px solid #ddd', background:'#fff'}}>
+        <button onClick={()=>{ setShowList(!showList); if(!allItems.length) getAllItems(); }} style={{width:'100%', padding:'8px 12px', borderRadius:8, border:'1px solid #ddd', background:'#fff'}}>
           Barcha sovg‘alar (narxlari bilan) {showList ? '▲' : '▼'}
         </button>
         {showList && (
