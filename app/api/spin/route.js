@@ -21,7 +21,7 @@ export async function POST(req) {
   const W = Number(wager);
   if (!TIERS.includes(W)) return NextResponse.json({ error: 'wager must be 50/100/200' }, { status: 400 });
 
-  // Spin lock (SpinState) – ensure row exists
+  // ensure state row exists
   let state = await prisma.spinState.findUnique({ where: { id: 'global' } });
   if (!state) state = await prisma.spinState.create({ data: { id: 'global', status: 'IDLE' } });
 
@@ -33,7 +33,7 @@ export async function POST(req) {
   const wallet = await prisma.wallet.findUnique({ where: { userId: me.sub } });
   if (!wallet || wallet.balance < W) return NextResponse.json({ error: 'insufficient_funds' }, { status: 400 });
 
-  // base items (this tier) + labels & images
+  // base items for this tier
   const items = await prisma.item.findMany({
     where: { tier: tierKey(W), isActive: true },
     orderBy: { createdAt: 'desc' }
@@ -43,11 +43,11 @@ export async function POST(req) {
   const nextItems = await prisma.item.findMany({ where: { tier: tierKey(nextTier(W)), isActive: true } });
   const randomNext = nextItems.length ? nextItems[Math.floor(Math.random() * nextItems.length)] : null;
 
-  // GRAND PRIZE (500-coin item) appears in 200-coin spin
+  // GRAND PRIZE (T500) only in 200 spin
   let grandPrize = null;
   if (W === 200) {
-    const gpList = await prisma.item.findMany({ where: { tier: 'T500', isActive: true } });
-    if (gpList.length) grandPrize = gpList[Math.floor(Math.random() * gpList.length)];
+    const gp = await prisma.item.findMany({ where: { tier: 'T500', isActive: true } });
+    if (gp.length) grandPrize = gp[Math.floor(Math.random() * gp.length)];
   }
 
   const segments = [
@@ -58,11 +58,9 @@ export async function POST(req) {
   if (randomNext) segments.push({ type: 'item', name: randomNext.name, tier: nextTier(W), imageUrl: randomNext.imageUrl || null });
   if (grandPrize) segments.push({ type: 'item', name: grandPrize.name, tier: 500, imageUrl: grandPrize.imageUrl || null, grand: true });
 
-  if (segments.length === 0) {
-    return NextResponse.json({ error: 'no items for this tier yet' }, { status: 400 });
-  }
+  if (!segments.length) return NextResponse.json({ error: 'no items for this tier yet' }, { status: 400 });
 
-  // debit wager + set SPINNING
+  // debit + lock
   await prisma.$transaction(async (tx) => {
     await tx.wallet.update({ where: { userId: me.sub }, data: { balance: { decrement: W } } });
     await tx.spinState.update({
@@ -71,7 +69,7 @@ export async function POST(req) {
     });
   });
 
-  // random result
+  // RNG
   const idx = Math.floor(Math.random() * segments.length);
   const result = segments[idx];
 
