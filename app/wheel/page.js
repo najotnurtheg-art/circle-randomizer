@@ -29,9 +29,10 @@ export default function WheelPage() {
   const [showList, setShowList] = useState(false);
   const [allItems, setAllItems] = useState([]);
 
-  // to not restart same animation
+  // prevent re-starting the same animation
   const currentSpinKey = useRef(null);
 
+  // ---------- drawing ----------
   const draw = (a, segs) => {
     const canvas = canvasRef.current; if (!canvas) return;
     const size = 360; const dpr = window.devicePixelRatio || 1;
@@ -50,50 +51,80 @@ export default function WheelPage() {
     // top pointer
     ctx.beginPath(); ctx.moveTo(cx, 8); ctx.lineTo(cx-12, 28); ctx.lineTo(cx+12, 28); ctx.closePath(); ctx.fillStyle='#ef4444'; ctx.fill();
   };
-
   useEffect(()=>{ draw(angle, segments); },[angle, segments]);
 
+  // ---------- helpers ----------
   const getMe = async () => {
-    const r = await fetch('/api/me'); if (!r.ok) { setMe(null); return; }
-    const j = await r.json(); setMe(j); setBalance(j.balance||0);
+    const r = await fetch('/api/me');
+    if (!r.ok) { setMe(null); return false; }
+    const j = await r.json(); setMe(j); setBalance(j.balance||0); return true;
   };
-
   const getSegments = async (w) => {
     const r = await fetch(`/api/segments?tier=${w}`);
     const j = await r.json();
     if (j.segments) setSegments(j.segments);
   };
-
   const getAllItems = async () => {
     const r = await fetch('/api/items/all'); setAllItems(await r.json());
   };
 
-  // shared animation based on server state
+  // -------- Telegram auto-login on open --------
+  const ensureTelegramAutoLogin = async () => {
+    // already logged in?
+    const ok = await getMe();
+    if (ok) return true;
+
+    // load Telegram SDK if available
+    const loadSdk = () => new Promise((resolve)=> {
+      if (window.Telegram?.WebApp) return resolve();
+      const s = document.createElement('script');
+      s.src = 'https://telegram.org/js/telegram-web-app.js';
+      s.onload = resolve;
+      s.onerror = resolve; // ignore errors outside Telegram
+      document.head.appendChild(s);
+    });
+    await loadSdk();
+
+    const tg = window.Telegram?.WebApp;
+    if (!tg || !tg.initData) return false; // not inside Telegram
+
+    try {
+      tg.expand?.();
+      const r = await fetch('/api/telegram/auth', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ initData: tg.initData }) // signed string
+      });
+      if (!r.ok) return false;
+      await getMe(); // refresh me/balance after auth
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // ---------- live spin sync ----------
   const startSharedSpin = (spin) => {
     if (!spin || !spin.segments?.length || typeof spin.resultIndex !== 'number' || !spin.spinStartAt) return;
 
-    // build a unique key so we don't restart
     const key = `${spin.username}-${spin.resultIndex}-${spin.spinStartAt}`;
     if (currentSpinKey.current === key) return;
     currentSpinKey.current = key;
 
-    setSegments(spin.segments); // show same slices
+    setSegments(spin.segments);
     const n = spin.segments.length;
     const step = 2 * Math.PI / n;
     const target = TOP_ANGLE - (spin.resultIndex * step + step / 2);
-    const turns = 6; // visual cycles
+    const turns = 6;
     const final = target + turns * 2 * Math.PI;
     const duration = Number(spin.durationMs || 10000);
     const startAtMs = new Date(spin.spinStartAt).getTime();
     const startAngle = angle % (2 * Math.PI);
 
-    // align to server start time
     const perfOffset = Math.max(0, Date.now() - startAtMs);
     const startPerf = performance.now() - perfOffset;
 
-    // cancel existing RAF
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-
     const run = (t) => {
       const elapsed = t - startPerf;
       const e = Math.min(1, elapsed / duration);
@@ -103,7 +134,6 @@ export default function WheelPage() {
         rafRef.current = requestAnimationFrame(run);
       } else {
         rafRef.current = null;
-        // after stop, show popup for watchers too
         const seg = spin.segments[spin.resultIndex];
         if (seg?.type === 'item') setPopup({ text: `'${spin.username}' siz '${seg.name}' yutib oldingiz🎉`, imageUrl: seg.imageUrl || null });
         else if (seg?.type === 'coins') setPopup({ text: `'${spin.username}' siz +${seg.amount} tangalarni yutib oldingiz🎉`, imageUrl: null });
@@ -120,27 +150,33 @@ export default function WheelPage() {
     if (j.status === 'SPINNING') startSharedSpin(j);
   };
 
+  // ---------- mount ----------
   useEffect(() => {
-    getMe();
-    getSegments(wager);
-    pollState();
-    const id = setInterval(pollState, 1000); // 1s polling is enough
-    return () => { clearInterval(id); if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+    (async () => {
+      await ensureTelegramAutoLogin();   // auto-login if opened inside Telegram
+      await getSegments(wager);          // initial wheel slices
+      await pollState();                 // start live sync
+      const id = setInterval(pollState, 1000);
+      return () => { clearInterval(id); if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const changeWager = (w) => {
-    setWager(w);
-    getSegments(w);
-  };
+  // ---------- UI actions ----------
+  const changeWager = (w) => { setWager(w); getSegments(w); };
 
   const spin = async () => {
     setErr(''); setPopup(null);
-    const meR = await fetch('/api/me'); if (!meR.ok) { setErr('Iltimos, /login orqali kiring'); return; }
-    const meJ = await meR.json(); setMe(meJ);
 
-    // check lock on client (server also enforces)
-    if (state.status === 'SPINNING' && state.username && state.username !== meJ.username) {
+    // make sure we’re logged in (works for both normal web & Telegram)
+    const authed = await getMe();
+    if (!authed) {
+      const ok = await ensureTelegramAutoLogin();
+      if (!ok) { setErr('Iltimos, /login orqali kiring'); return; }
+    }
+
+    // hard lock check (server also enforces)
+    if (state.status === 'SPINNING' && state.username && state.username !== me?.username) {
       setErr(`Band: hozir ${state.username} aylanmoqda`);
       return;
     }
@@ -154,7 +190,7 @@ export default function WheelPage() {
     const j = await r.json();
     if (!r.ok) { setErr(j.error||'xato'); setSpinning(false); return; }
 
-    // start the same shared animation immediately
+    // start the shared animation immediately for spinner too
     startSharedSpin(j);
     setBalance(j.balance || 0);
     setSpinning(false);
