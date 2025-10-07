@@ -11,7 +11,7 @@ export default function AdminCoins() {
 
   const loadUsers = async () => {
     setErr(''); setOk('');
-    const r = await fetch('/api/admin/users');
+    const r = await fetch('/api/admin/users', { cache: 'no-store' });
     if (!r.ok) { setErr('Admin only'); return; }
     setUsers(await r.json());
   };
@@ -21,7 +21,10 @@ export default function AdminCoins() {
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return users;
-    return users.filter(u => u.username.toLowerCase().includes(needle));
+    return users.filter(u =>
+      u.displayName.toLowerCase().includes(needle) ||
+      u.username.toLowerCase().includes(needle)
+    );
   }, [users, q]);
 
   const submit = async (e) => {
@@ -39,7 +42,6 @@ export default function AdminCoins() {
     if (!r.ok) { setErr(j.error||'error'); return; }
     setOk(`Sent ${val} to ${j.username}. New balance: ${j.balance}`);
     setAmount('');
-    // refresh balances list
     loadUsers();
   };
 
@@ -51,12 +53,7 @@ export default function AdminCoins() {
 
       <form onSubmit={submit} style={{display:'grid', gap:10, maxWidth:520, marginTop:12}}>
         <div style={{display:'flex', gap:8}}>
-          <input
-            value={q}
-            onChange={e=>setQ(e.target.value)}
-            placeholder="Search user..."
-            style={{padding:8, flex:1}}
-          />
+          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search user..." style={{padding:8, flex:1}}/>
           <button type="button" onClick={loadUsers}>Refresh</button>
         </div>
 
@@ -64,7 +61,7 @@ export default function AdminCoins() {
           <option value="">— Pick a user —</option>
           {filtered.map(u=>(
             <option key={u.id} value={u.id}>
-              {u.username} (balance: {u.balance}, role: {u.role})
+              {u.displayName} ({u.username}) — balance: {u.balance}
             </option>
           ))}
         </select>
@@ -91,7 +88,7 @@ export default function AdminCoins() {
       <div style={{marginTop:20}}>
         {selectedUser && (
           <div style={{fontSize:14, color:'#555'}}>
-            Selected: <b>{selectedUser.username}</b> — Current balance: <b>{selectedUser.balance}</b>
+            Selected: <b>{selectedUser.displayName}</b> ({selectedUser.username}) — Current balance: <b>{selectedUser.balance}</b>
           </div>
         )}
       </div>
@@ -101,10 +98,11 @@ export default function AdminCoins() {
       <h3>All Users (latest 500)</h3>
       <div style={{maxHeight:300, overflow:'auto', border:'1px solid #eee'}}>
         <table border="1" cellPadding="6" style={{borderCollapse:'collapse', width:'100%'}}>
-          <thead><tr><th>Username</th><th>Balance</th><th>Role</th><th>Joined</th></tr></thead>
+          <thead><tr><th>Display</th><th>Username</th><th>Balance</th><th>Role</th><th>Joined</th></tr></thead>
           <tbody>
             {users.map(u=>(
               <tr key={u.id} style={{background: u.id===selectedId ? '#f1f5f9' : 'transparent'}}>
+                <td>{u.displayName}</td>
                 <td>{u.username}</td>
                 <td>{u.balance}</td>
                 <td>{u.role}</td>
