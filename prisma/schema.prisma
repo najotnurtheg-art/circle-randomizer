@@ -20,12 +20,13 @@ enum PriceTier {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  username  String   @unique
-  password  String
-  role      Role     @default(USER)
-  createdAt DateTime @default(now())
-  wallet    Wallet?
+  id           String   @id @default(cuid())
+  username     String   @unique
+  displayName  String?             // NEW: pretty name for UI
+  password     String
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now())
+  wallet       Wallet?
 }
 
 model Wallet {
@@ -50,7 +51,7 @@ model SpinState {
   id          String   @id @default("global") // single row
   status      String   @default("IDLE")       // IDLE | SPINNING
   userId      String?
-  username    String?
+  username    String?                          // used as display name in UI
   wager       Int?
   segments    Json?
   resultIndex Int?
