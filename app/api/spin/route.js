@@ -21,73 +21,66 @@ export async function POST(req) {
   const W = Number(wager);
   if (!TIERS.includes(W)) return NextResponse.json({ error: 'wager must be 50/100/200' }, { status: 400 });
 
-  // Ensure SpinState row exists
+  // Spin lock (SpinState) – ensure row exists
   let state = await prisma.spinState.findUnique({ where: { id: 'global' } });
   if (!state) state = await prisma.spinState.create({ data: { id: 'global', status: 'IDLE' } });
 
-  // If someone else is spinning, block
   if (state.status !== 'IDLE' && state.userId !== me.sub) {
     return NextResponse.json({ error: `busy: ${state.username} is spinning` }, { status: 409 });
   }
 
-  // Make sure user has coins
+  // balance check
   const wallet = await prisma.wallet.findUnique({ where: { userId: me.sub } });
   if (!wallet || wallet.balance < W) return NextResponse.json({ error: 'insufficient_funds' }, { status: 400 });
 
-  // Build segments:
-  //  - all items in selected tier
-  //  - + "Another spin"
-  //  - + one "next tier coins"
-  //  - + one random item from next tier (if any)
-  const items = await prisma.item.findMany({ where: { tier: tierKey(W), isActive: true } });
+  // base items (this tier) + labels & images
+  const items = await prisma.item.findMany({
+    where: { tier: tierKey(W), isActive: true },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  // next-tier random item
   const nextItems = await prisma.item.findMany({ where: { tier: tierKey(nextTier(W)), isActive: true } });
   const randomNext = nextItems.length ? nextItems[Math.floor(Math.random() * nextItems.length)] : null;
 
+  // GRAND PRIZE (500-coin item) appears in 200-coin spin
+  let grandPrize = null;
+  if (W === 200) {
+    const gpList = await prisma.item.findMany({ where: { tier: 'T500', isActive: true } });
+    if (gpList.length) grandPrize = gpList[Math.floor(Math.random() * gpList.length)];
+  }
+
   const segments = [
-    ...items.map(i => ({ type: 'item', name: i.name, tier: W })),
+    ...items.map(i => ({ type: 'item', name: i.name, tier: W, imageUrl: i.imageUrl || null })),
     { type: 'another_spin' },
     { type: 'coins', amount: nextTier(W) },
   ];
-  if (randomNext) segments.push({ type: 'item', name: randomNext.name, tier: nextTier(W) });
+  if (randomNext) segments.push({ type: 'item', name: randomNext.name, tier: nextTier(W), imageUrl: randomNext.imageUrl || null });
+  if (grandPrize) segments.push({ type: 'item', name: grandPrize.name, tier: 500, imageUrl: grandPrize.imageUrl || null, grand: true });
 
   if (segments.length === 0) {
     return NextResponse.json({ error: 'no items for this tier yet' }, { status: 400 });
   }
 
-  // Charge wager and mark state as SPINNING (locks others)
+  // debit wager + set SPINNING
   await prisma.$transaction(async (tx) => {
-    // debit
     await tx.wallet.update({ where: { userId: me.sub }, data: { balance: { decrement: W } } });
-
-    // set SPINNING with user + segments
     await tx.spinState.update({
       where: { id: 'global' },
-      data: {
-        status: 'SPINNING',
-        userId: me.sub,
-        username: me.username,
-        wager: W,
-        segments
-      }
+      data: { status: 'SPINNING', userId: me.sub, username: me.username, wager: W, segments }
     });
   });
 
-  // Pick random result (server-side)
+  // random result
   const idx = Math.floor(Math.random() * segments.length);
   const result = segments[idx];
 
-  // Payout if coins
+  // payout if coins
   if (result.type === 'coins') {
     await prisma.wallet.update({ where: { userId: me.sub }, data: { balance: { increment: result.amount } } });
   }
 
-  // Save RESULT so everyone can see who won and what
-  await prisma.spinState.update({
-    where: { id: 'global' },
-    data: { status: 'RESULT', resultIndex: idx }
-  });
-
-  // Current balance
+  await prisma.spinState.update({ where: { id: 'global' }, data: { status: 'RESULT', resultIndex: idx } });
   const bal = await prisma.wallet.findUnique({ where: { userId: me.sub } });
 
   return NextResponse.json({
