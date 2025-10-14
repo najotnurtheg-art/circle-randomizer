@@ -4,18 +4,34 @@ export const revalidate = 0;
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 
+const ID = 'global';
+
+function idle() {
+  return {
+    status: 'IDLE',
+    userId: null,
+    username: null,
+    wager: null,
+    segments: [],
+    resultIndex: null,
+    spinStartAt: null,
+    durationMs: null,
+    popup: null,
+  };
+}
+
 export async function GET() {
-  let s = await prisma.spinState.findUnique({ where: { id: 'global' } });
+  let s = await prisma.spinState.findUnique({ where: { id: ID } });
   if (!s) {
-    s = await prisma.spinState.create({ data: { id: 'global', status: 'IDLE' } });
+    s = await prisma.spinState.create({ data: { id: ID, status: 'IDLE' } });
   }
 
-  // Auto-reset after the spin duration has passed
   if (s.status === 'SPINNING' && s.spinStartAt && s.durationMs) {
-    const doneAt = new Date(s.spinStartAt).getTime() + Number(s.durationMs);
-    if (Date.now() >= doneAt + 200) {
+    const started = new Date(s.spinStartAt).getTime();
+    const grace = 3000;
+    if (Date.now() > started + Number(s.durationMs) + grace) {
       s = await prisma.spinState.update({
-        where: { id: 'global' },
+        where: { id: ID },
         data: {
           status: 'IDLE',
           userId: null,
@@ -24,24 +40,28 @@ export async function GET() {
           segments: [],
           resultIndex: null,
           spinStartAt: null,
-          durationMs: null
-        }
+          durationMs: null,
+          popup: null,
+        },
       });
+      return NextResponse.json(idle(), { headers: { 'Cache-Control': 'no-store' } });
     }
   }
 
-  return NextResponse.json(
-    {
-      status: s.status,
-      userId: s.userId || null,         // NEW
-      username: s.username || null,     // this is *display* name
-      wager: s.wager || null,
-      segments: s.segments || [],
-      resultIndex: s.resultIndex ?? null,
-      spinStartAt: s.spinStartAt || null,
-      durationMs: s.durationMs || null,
-      updatedAt: s.updatedAt
-    },
-    { headers: { 'Cache-Control': 'no-store' } }
-  );
+  const payload =
+    s.status === 'SPINNING'
+      ? {
+          status: s.status,
+          userId: s.userId,
+          username: s.username,
+          wager: s.wager,
+          segments: s.segments || [],
+          resultIndex: s.resultIndex ?? null,
+          spinStartAt: s.spinStartAt,
+          durationMs: s.durationMs,
+          popup: s.popup ?? null,
+        }
+      : idle();
+
+  return NextResponse.json(payload, { headers: { 'Cache-Control': 'no-store' } });
 }

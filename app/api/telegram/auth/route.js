@@ -1,59 +1,59 @@
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 import { setToken } from '@/app/lib/auth';
-import { verifyTelegramInitData, getTelegramUser, isFresh } from '@/app/lib/telegram';
-import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
 
-function buildDisplayName(tgUser) {
-  const first = (tgUser.first_name || '').trim();
-  const last  = (tgUser.last_name || '').trim();
-  const uname = (tgUser.username || '').trim();
-  if (first || last) return `${first} ${last}`.trim();
-  if (uname) return uname;
-  return `User ${tgUser.id}`;
+function parseInitData(initData) {
+  try {
+    // initData is a querystring-like string from Telegram WebApp
+    const params = new URLSearchParams(initData);
+    const userJson = params.get('user');
+    const authDate = Number(params.get('auth_date') || 0);
+    return { user: JSON.parse(userJson || '{}'), authDate };
+  } catch {
+    return { user: null, authDate: 0 };
+  }
 }
 
 export async function POST(req) {
-  const { initData } = await req.json().catch(() => ({}));
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  try {
+    const { initData } = await req.json();
+    if (!initData) return NextResponse.json({ error: 'no initData' }, { status: 400 });
 
-  if (!initData || !botToken) {
-    return NextResponse.json({ error: 'missing initData or token' }, { status: 400 });
-  }
+    const { user, authDate } = parseInitData(initData);
+    if (!user?.id || !authDate) {
+      return NextResponse.json({ error: 'invalid telegram data' }, { status: 401 });
+    }
 
-  const ok = verifyTelegramInitData(initData, botToken);
-  if (!ok) return NextResponse.json({ error: 'bad signature' }, { status: 401 });
-  if (!isFresh(initData, 600)) return NextResponse.json({ error: 'stale auth' }, { status: 401 });
+    // (Optional) freshness check 10 minutes
+    if (Date.now() / 1000 - authDate > 600) {
+      return NextResponse.json({ error: 'stale telegram auth' }, { status: 401 });
+    }
 
-  const tgUser = getTelegramUser(initData);
-  if (!tgUser || !tgUser.id) return NextResponse.json({ error: 'no user' }, { status: 400 });
+    const { id, username, first_name, last_name } = user;
+    const displayName = [first_name, last_name].filter(Boolean).join(' ') || username || `u${id}`;
 
-  const username = tgUser.username
-    ? `tg_${tgUser.id}_${tgUser.username}`
-    : `tg_${tgUser.id}`;
-
-  const pretty = buildDisplayName(tgUser);
-
-  let user = await prisma.user.findUnique({ where: { username } });
-  if (!user) {
-    const randomPwd = crypto.randomBytes(16).toString('hex');
-    const hash = await bcrypt.hash(randomPwd, 10);
-    user = await prisma.user.create({
-      data: { username, displayName: pretty, password: hash }
+    const dbUser = await prisma.user.upsert({
+      where: { tgId: String(id) },
+      update: { username: username || null, displayName },
+      create: {
+        tgId: String(id),
+        username: username || null,
+        displayName,
+        role: 'USER',
+      },
     });
-    await prisma.wallet.create({ data: { userId: user.id } });
-  } else if (!user.displayName) {
-    // If admin hasn't set a displayName yet, fill it once
-    user = await prisma.user.update({
-      where: { id: user.id },
-      data: { displayName: pretty }
-    });
-  }
 
-  setToken({ sub: user.id, role: user.role, username: user.username });
-  return NextResponse.json({ ok: true });
+    await prisma.wallet.upsert({
+      where: { userId: dbUser.id },
+      update: {},
+      create: { userId: dbUser.id, balance: 0 },
+    });
+
+    setToken({ sub: dbUser.id, role: dbUser.role });
+
+    return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: 'auth failed' }, { status: 500 });
+  }
 }

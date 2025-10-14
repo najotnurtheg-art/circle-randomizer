@@ -1,56 +1,61 @@
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
+// ---------- Generator ----------
 generator client {
   provider = "prisma-client-js"
 }
 
+// ---------- Datasource ----------
+datasource db {
+  provider = "postgresql"  // change to mysql/sqlite if needed
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
 enum Role {
   USER
   ADMIN
 }
 
-enum PriceTier {
+// Map to your existing Postgres enum type name for Item.tier.
+// If your DB enum is named differently, change "Tier" below.
+enum ItemTier {
   T50
   T100
   T200
   T500
+
+  @@map("Tier")
 }
 
+// ---------- Models ----------
 model User {
-  id           String   @id @default(cuid())
-  username     String   @unique
+  id           String    @id @default(cuid())
+  tgId         String?   @unique
+  username     String?
   displayName  String?
-  password     String
-  role         Role     @default(USER)
-  featured     Boolean  @default(false)   // NEW: show on main page right list
-  createdAt    DateTime @default(now())
+  role         Role      @default(USER)
+  createdAt    DateTime  @default(now())
   wallet       Wallet?
 }
 
 model Wallet {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  balance   Int      @default(0)
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id])
+  userId   String   @id
+  balance  Int      @default(0)
+  user     User     @relation(fields: [userId], references: [id])
 }
 
 model Item {
-  id        String    @id @default(cuid())
-  name      String
-  tier      PriceTier
-  isActive  Boolean   @default(true)
-  imageUrl  String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id           String    @id @default(cuid())
+  name         String
+  tier         ItemTier
+  isActive     Boolean   @default(true)
+  purchasable  Boolean   @default(false)
+  imageUrl     String?
+  createdAt    DateTime  @default(now())
 }
 
 model SpinState {
-  id          String   @id @default("global")
-  status      String   @default("IDLE")   // IDLE | SPINNING
+  id          String   @id          // 'global'
+  status      String                // 'IDLE' | 'SPINNING'
   userId      String?
   username    String?
   wager       Int?
@@ -58,6 +63,7 @@ model SpinState {
   resultIndex Int?
   spinStartAt DateTime?
   durationMs  Int?
+  popup       Json?
   updatedAt   DateTime @updatedAt
 }
 
