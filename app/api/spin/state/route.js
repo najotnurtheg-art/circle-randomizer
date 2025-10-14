@@ -16,52 +16,42 @@ function idle() {
     resultIndex: null,
     spinStartAt: null,
     durationMs: null,
-    popup: null,
   };
 }
 
 export async function GET() {
   let s = await prisma.spinState.findUnique({ where: { id: ID } });
-  if (!s) {
-    s = await prisma.spinState.create({ data: { id: ID, status: 'IDLE' } });
-  }
+  if (!s) s = await prisma.spinState.create({ data: { id: ID, status: 'IDLE' } });
 
+  // expire lock if time passed
   if (s.status === 'SPINNING' && s.spinStartAt && s.durationMs) {
     const started = new Date(s.spinStartAt).getTime();
-    const grace = 3000;
+    const grace = 1500;
     if (Date.now() > started + Number(s.durationMs) + grace) {
-      s = await prisma.spinState.update({
+      await prisma.spinState.update({
         where: { id: ID },
         data: {
           status: 'IDLE',
-          userId: null,
-          username: null,
-          wager: null,
-          segments: [],
-          resultIndex: null,
-          spinStartAt: null,
-          durationMs: null,
-          popup: null,
+          userId: null, username: null, wager: null,
+          segments: [], resultIndex: null, spinStartAt: null, durationMs: null,
         },
       });
       return NextResponse.json(idle(), { headers: { 'Cache-Control': 'no-store' } });
     }
   }
 
-  const payload =
-    s.status === 'SPINNING'
-      ? {
-          status: s.status,
-          userId: s.userId,
-          username: s.username,
-          wager: s.wager,
-          segments: s.segments || [],
-          resultIndex: s.resultIndex ?? null,
-          spinStartAt: s.spinStartAt,
-          durationMs: s.durationMs,
-          popup: s.popup ?? null,
-        }
-      : idle();
+  const payload = s.status === 'SPINNING'
+    ? {
+        status: 'SPINNING',
+        userId: s.userId,
+        username: s.username,
+        wager: s.wager,
+        segments: s.segments || [],
+        resultIndex: s.resultIndex,
+        spinStartAt: s.spinStartAt,
+        durationMs: s.durationMs || 10000,
+      }
+    : idle();
 
   return NextResponse.json(payload, { headers: { 'Cache-Control': 'no-store' } });
 }
