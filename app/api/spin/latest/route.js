@@ -8,7 +8,6 @@ export async function GET() {
   const logs = await prisma.spinLog.findMany({
     orderBy: { createdAt: 'desc' },
     take: 50,
-    // NOTE: SpinLog already stores username/userId; no relation include needed
   });
 
   return NextResponse.json(
