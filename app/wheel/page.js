@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 
+<<<<<<< HEAD
 const TOP_ANGLE = -Math.PI / 2; // pointer at top
 const label = (seg) =>
   seg?.type === 'item'
@@ -8,11 +9,20 @@ const label = (seg) =>
     : seg?.type === 'coins'
     ? `+${seg.amount} coins`
     : 'Another spin';
+=======
+const TOP_ANGLE = -Math.PI/2; // pointer at top
+
+function label(seg) {
+  if (!seg) return '';
+  if (seg.type === 'item') return seg.name;
+  if (seg.type === 'coins') return `+${seg.amount} coins`;
+  return 'Another spin';
+}
+>>>>>>> parent of 987b5d3 (Update page.js)
 
 export default function WheelPage() {
   const canvasRef = useRef(null);
   const rafRef = useRef(null);
-
   const [angle, setAngle] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [wager, setWager] = useState(50);
@@ -29,13 +39,15 @@ export default function WheelPage() {
   const [me, setMe] = useState(null);
 
   const [popup, setPopup] = useState(null);
-  const [popupCountdown, setPopupCountdown] = useState(0);
-
   const [showList, setShowList] = useState(false);
   const [allItems, setAllItems] = useState([]);
   const [featuredUsers, setFeaturedUsers] = useState([]);
+<<<<<<< HEAD
   const [latestWins, setLatestWins] = useState([]);
   const [storeItems, setStoreItems] = useState([]);
+=======
+  const [latestWins, setLatestWins] = useState([]); // NEW
+>>>>>>> parent of 987b5d3 (Update page.js)
 
   const currentSpinKey = useRef(null);
 
@@ -77,6 +89,7 @@ export default function WheelPage() {
       ctx.restore();
     }
     ctx.restore();
+<<<<<<< HEAD
     // pointer at top
     ctx.beginPath();
     ctx.moveTo(cx, 8);
@@ -85,6 +98,10 @@ export default function WheelPage() {
     ctx.closePath();
     ctx.fillStyle = '#ef4444';
     ctx.fill();
+=======
+    // top pointer
+    ctx.beginPath(); ctx.moveTo(cx, 8); ctx.lineTo(cx-12, 28); ctx.lineTo(cx+12, 28); ctx.closePath(); ctx.fillStyle='#ef4444'; ctx.fill();
+>>>>>>> parent of 987b5d3 (Update page.js)
   };
   useEffect(() => {
     draw(angle, segments);
@@ -141,6 +158,16 @@ export default function WheelPage() {
       setStoreItems([]);
     }
   };
+<<<<<<< HEAD
+=======
+  const getSegments = async (w) => {
+    const r = await fetch(`/api/segments?tier=${w}`); const j = await r.json();
+    if (j.segments) setSegments(j.segments);
+  };
+  const getAllItems = async () => { const r = await fetch('/api/items/all'); setAllItems(await r.json()); };
+  const getFeatured = async () => { const r = await fetch('/api/users/featured', { cache:'no-store' }); setFeaturedUsers(await r.json()); };
+  const getLatestWins = async () => { const r = await fetch('/api/spin/latest', { cache:'no-store' }); setLatestWins(await r.json()); }; // NEW
+>>>>>>> parent of 987b5d3 (Update page.js)
 
   const ensureTelegramAutoLogin = async () => {
     const ok = await getMe();
@@ -172,6 +199,7 @@ export default function WheelPage() {
     }
   };
 
+<<<<<<< HEAD
   // ---------- spin normalize + animation ----------
   const normalizeSpin = (raw) => {
     if (!raw || typeof raw !== 'object') return null;
@@ -207,6 +235,11 @@ export default function WheelPage() {
       return;
     }
 
+=======
+  // ---------- live spin sync ----------
+  const startSharedSpin = (spin) => {
+    if (!spin || !spin.segments?.length || typeof spin.resultIndex !== 'number' || !spin.spinStartAt) return;
+>>>>>>> parent of 987b5d3 (Update page.js)
     const key = `${spin.userId}-${spin.resultIndex}-${spin.spinStartAt}`;
     if (currentSpinKey.current === key) return;
     currentSpinKey.current = key;
@@ -247,6 +280,7 @@ export default function WheelPage() {
             imageUrl: null,
           });
         else setPopup({ text: `'${spin.username}' uchun yana bir aylantirish!`, imageUrl: null });
+        // refresh latest wins after a spin ends
         getLatestWins();
         releaseSpin(); // free global lock at the end
       }
@@ -267,10 +301,10 @@ export default function WheelPage() {
       await ensureTelegramAutoLogin();
       await getSegments(wager);
       await getFeatured();
-      await getLatestWins();
-      await getStore();
+      await getLatestWins();                 // initial load
       await pollState();
       const id1 = setInterval(pollState, 1000);
+<<<<<<< HEAD
       const id2 = setInterval(getFeatured, 3000);
       const id3 = setInterval(getLatestWins, 4000);
       const id4 = setInterval(getStore, 6000);
@@ -281,10 +315,16 @@ export default function WheelPage() {
         clearInterval(id4);
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
       };
+=======
+      const id2 = setInterval(getFeatured, 3000);   // balances refresh
+      const id3 = setInterval(getLatestWins, 4000); // wins refresh
+      return () => { clearInterval(id1); clearInterval(id2); clearInterval(id3); if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+>>>>>>> parent of 987b5d3 (Update page.js)
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+<<<<<<< HEAD
   // ---------- AUTO-CLOSE POPUP AFTER 10s ----------
   useEffect(() => {
     if (!popup) return;
@@ -312,6 +352,10 @@ export default function WheelPage() {
     getSegments(w);
   };
 
+=======
+  // ---------- actions ----------
+  const changeWager = (w) => { setWager(w); getSegments(w); };
+>>>>>>> parent of 987b5d3 (Update page.js)
   const spin = async () => {
     setErr('');
     setPopup(null);
@@ -345,6 +389,7 @@ export default function WheelPage() {
     setSpinning(false);
   };
 
+<<<<<<< HEAD
   const buy = async (itemId) => {
     setErr('');
     const authed = await getMe();
@@ -383,9 +428,19 @@ export default function WheelPage() {
         minHeight: '100vh',
       }}
     >
+=======
+  // ---------- UI ----------
+  return (
+    <div style={{ padding:24, fontFamily:'system-ui, sans-serif', color:'#e5e7eb', background:'#111', minHeight:'100vh' }}>
+>>>>>>> parent of 987b5d3 (Update page.js)
       <style>{`
         .wrap { display:grid; grid-template-columns: 260px 1fr 260px; gap:20px; align-items:start; }
-        @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } .side { order: 3; } .side-right { order: 4; } .center { order: 2; } }
+        @media (max-width: 900px) {
+          .wrap { grid-template-columns: 1fr; }
+          .side { order: 3; }
+          .side-right { order: 4; }
+          .center { order: 2; }
+        }
         .card { background:#1f2937; border:1px solid #374151; border-radius:12px; padding:12px; }
         .title { font-weight:700; margin-bottom:8px; color:#fff; }
         .pill { padding:8px 12px; border-radius:8px; border:1px solid #374151; background:#0b0b0b; color:#fff; }
@@ -394,7 +449,7 @@ export default function WheelPage() {
       `}</style>
 
       <div className="wrap">
-        {/* LEFT column */}
+        {/* LEFT: terms */}
         <div className="side">
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="title">Qoidalar (tanga olish)</div>
@@ -411,6 +466,7 @@ export default function WheelPage() {
             </div>
           </div>
 
+          {/* NEW: latest 5 prizes */}
           <div className="card">
             <div className="title">Oxirgi 5 yutuq</div>
             {latestWins.length === 0 ? (
@@ -464,6 +520,7 @@ export default function WheelPage() {
           </div>
         </div>
 
+<<<<<<< HEAD
         {/* CENTER column */}
         <div className="center" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
@@ -499,6 +556,20 @@ export default function WheelPage() {
             ) : (
               <span>Keyingi o‘yinchi tayyor!</span>
             )}
+=======
+        {/* CENTER: wheel */}
+        <div className="center" style={{display:'flex', flexDirection:'column', alignItems:'center', gap:12}}>
+          <div style={{display:'flex', gap:8, marginTop:4}}>
+            <button onClick={()=>setWager(50) || getSegments(50)}  disabled={spinning} className="pill" style={{background:wager===50?'#2563eb':'#0b0b0b'}}>50 tanga</button>
+            <button onClick={()=>setWager(100)|| getSegments(100)} disabled={spinning} className="pill" style={{background:wager===100?'#2563eb':'#0b0b0b'}}>100 tanga</button>
+            <button onClick={()=>setWager(200)|| getSegments(200)} disabled={spinning} className="pill" style={{background:wager===200?'#2563eb':'#0b0b0b'}}>200 tanga</button>
+          </div>
+
+          <div style={{marginTop:4, color:'#cbd5e1'}}>
+            {state.status === 'SPINNING'
+              ? <b>Hozir: {state.username} aylanmoqda</b>
+              : <span>Keyingi o‘yinchi tayyor!</span>}
+>>>>>>> parent of 987b5d3 (Update page.js)
           </div>
 
           <canvas
@@ -516,7 +587,11 @@ export default function WheelPage() {
 
           <button
             onClick={spin}
+<<<<<<< HEAD
             disabled={spinning || (state.status === 'SPINNING' && state.userId && state.userId !== me?.id)}
+=======
+            disabled={spinning || (state.status==='SPINNING' && state.userId && state.userId !== me?.id)}
+>>>>>>> parent of 987b5d3 (Update page.js)
             className="btn"
           >
             {spinning ? 'Aylanyapti…' : `Spin (-${wager})`}
@@ -560,6 +635,7 @@ export default function WheelPage() {
           {err && <div style={{ color: '#fca5a5' }}>{err}</div>}
         </div>
 
+<<<<<<< HEAD
         {/* RIGHT column */}
         <div className="side side-right">
           <div className="card" style={{ marginBottom: 16 }}>
@@ -638,11 +714,30 @@ export default function WheelPage() {
               yechiladi va g‘oliblar ro‘yxatiga qo‘shiladi.
             </div>
           </div>
+=======
+        {/* RIGHT: featured users + balances */}
+        <div className="side side-right card">
+          <div className="title">Ishtirokchilar balansi</div>
+          {featuredUsers.length === 0 ? (
+            <div style={{opacity:.8}}>Hozircha ro‘yxat bo‘sh. Admin “Users” sahifasida belgilaydi.</div>
+          ) : (
+            <ul style={{margin:0, paddingLeft:0, listStyle:'none', lineHeight:1.6}}>
+              {featuredUsers.map(u=>(
+                <li key={u.id} style={{display:'flex', justifyContent:'space-between', gap:8, padding:'4px 0', borderBottom:'1px dashed #374151'}}>
+                  <span>{u.displayName}</span>
+                  <b>{u.balance}</b>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div style={{fontSize:12, opacity:.8, marginTop:6}}>Ro‘yxat har 3 soniyada yangilanadi.</div>
+>>>>>>> parent of 987b5d3 (Update page.js)
         </div>
       </div>
 
       {/* POPUP */}
       {popup && (
+<<<<<<< HEAD
         <div
           style={{
             position: 'fixed',
@@ -672,6 +767,14 @@ export default function WheelPage() {
             >
               OK
             </button>
+=======
+        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:50}}
+             onClick={()=>setPopup(null)}>
+          <div style={{background:'white', padding:20, borderRadius:12, maxWidth:320, textAlign:'center'}} onClick={(e)=>e.stopPropagation()}>
+            {popup.imageUrl && <img src={popup.imageUrl} alt="prize" style={{width:'100%', borderRadius:8, marginBottom:12}}/>}
+            <div style={{fontWeight:700, marginBottom:8, color:'#111'}}>{popup.text}</div>
+            <button onClick={()=>setPopup(null)} style={{padding:'8px 12px', borderRadius:8, background:'black', color:'white'}}>OK</button>
+>>>>>>> parent of 987b5d3 (Update page.js)
           </div>
         </div>
       )}
