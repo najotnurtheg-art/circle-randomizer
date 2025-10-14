@@ -26,6 +26,8 @@ export default function WheelPage() {
   const [showList, setShowList] = useState(false);
   const [allItems, setAllItems] = useState([]);
   const [featuredUsers, setFeaturedUsers] = useState([]);
+  const [latestWins, setLatestWins] = useState([]); // NEW
+
   const currentSpinKey = useRef(null);
 
   // ---------- drawing ----------
@@ -60,6 +62,7 @@ export default function WheelPage() {
   };
   const getAllItems = async () => { const r = await fetch('/api/items/all'); setAllItems(await r.json()); };
   const getFeatured = async () => { const r = await fetch('/api/users/featured', { cache:'no-store' }); setFeaturedUsers(await r.json()); };
+  const getLatestWins = async () => { const r = await fetch('/api/spin/latest', { cache:'no-store' }); setLatestWins(await r.json()); }; // NEW
 
   const ensureTelegramAutoLogin = async () => {
     const ok = await getMe(); if (ok) return true;
@@ -114,6 +117,8 @@ export default function WheelPage() {
         if (seg?.type === 'item') setPopup({ text: `'${spin.username}' siz '${seg.name}' yutib oldingiz🎉`, imageUrl: seg.imageUrl || null });
         else if (seg?.type === 'coins') setPopup({ text: `'${spin.username}' siz +${seg.amount} tangalarni yutib oldingiz🎉`, imageUrl: null });
         else setPopup({ text: `'${spin.username}' uchun yana bir aylantirish!`, imageUrl: null });
+        // refresh latest wins after a spin ends
+        getLatestWins();
       }
     };
     rafRef.current = requestAnimationFrame(run);
@@ -132,10 +137,12 @@ export default function WheelPage() {
       await ensureTelegramAutoLogin();
       await getSegments(wager);
       await getFeatured();
+      await getLatestWins();                 // initial load
       await pollState();
       const id1 = setInterval(pollState, 1000);
-      const id2 = setInterval(getFeatured, 3000); // refresh balances every 3s
-      return () => { clearInterval(id1); clearInterval(id2); if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+      const id2 = setInterval(getFeatured, 3000);   // balances refresh
+      const id3 = setInterval(getLatestWins, 4000); // wins refresh
+      return () => { clearInterval(id1); clearInterval(id2); clearInterval(id3); if (rafRef.current) cancelAnimationFrame(rafRef.current); };
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -165,12 +172,11 @@ export default function WheelPage() {
   // ---------- UI ----------
   return (
     <div style={{ padding:24, fontFamily:'system-ui, sans-serif', color:'#e5e7eb', background:'#111', minHeight:'100vh' }}>
-      {/* responsive layout */}
       <style>{`
         .wrap { display:grid; grid-template-columns: 260px 1fr 260px; gap:20px; align-items:start; }
         @media (max-width: 900px) {
           .wrap { grid-template-columns: 1fr; }
-          .side { order: 3; }  /* both side panels move below */
+          .side { order: 3; }
           .side-right { order: 4; }
           .center { order: 2; }
         }
@@ -178,27 +184,47 @@ export default function WheelPage() {
         .title { font-weight:700; margin-bottom:8px; color:#fff; }
         .pill { padding:8px 12px; border-radius:8px; border:1px solid #374151; background:#0b0b0b; color:#fff; }
         .btn { padding:10px 16px; border-radius:12px; background:#000; color:#fff; border:1px solid #374151; }
-        .btn.switch { background: ${spinning ? '#222' : '#000'}; }
         a { color:#93c5fd; }
       `}</style>
 
       <div className="wrap">
         {/* LEFT: terms */}
-        <div className="side card">
-          <div className="title">Qoidalar (tanga olish)</div>
-          <ul style={{margin:0, paddingLeft:16, lineHeight:1.6}}>
-            <li>Onlayn <b>300.000 so‘m</b> = <b>10 tanga</b></li>
-            <li>Oflayn <b>1.000.000 so‘m</b> = <b>10 tanga</b></li>
-          </ul>
-          <div style={{fontSize:12, opacity:.8, marginTop:6}}>Admin bu ro‘yxatni kerak bo‘lsa keyin kengaytirishi mumkin.</div>
+        <div className="side">
+          <div className="card" style={{marginBottom:16}}>
+            <div className="title">Qoidalar (tanga olish)</div>
+            <ul style={{margin:0, paddingLeft:16, lineHeight:1.6}}>
+              <li>Onlayn <b>300.000 so‘m</b> = <b>10 tanga</b></li>
+              <li>Oflayn <b>1.000.000 so‘m</b> = <b>10 tanga</b></li>
+            </ul>
+            <div style={{fontSize:12, opacity:.8, marginTop:6}}>Admin bu ro‘yxatni kerak bo‘lsa keyin kengaytirishi mumkin.</div>
+          </div>
+
+          {/* NEW: latest 5 prizes */}
+          <div className="card">
+            <div className="title">Oxirgi 5 yutuq</div>
+            {latestWins.length === 0 ? (
+              <div style={{opacity:.8}}>Hali yutuqlar ro‘yxati yo‘q.</div>
+            ) : (
+              <ul style={{margin:0, paddingLeft:0, listStyle:'none', lineHeight:1.6}}>
+                {latestWins.map(w => (
+                  <li key={w.id} style={{display:'flex', justifyContent:'space-between', gap:8, padding:'6px 0', borderBottom:'1px dashed #374151'}}>
+                    <span style={{maxWidth:'60%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{w.displayName}</span>
+                    <span title={new Date(w.when).toLocaleString()} style={{opacity:.8, fontSize:12}}>{new Date(w.when).toLocaleTimeString()}</span>
+                    <b style={{maxWidth:'35%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{w.prize}</b>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div style={{fontSize:12, opacity:.8, marginTop:6}}>Ro‘yxat har 4 soniyada yangilanadi.</div>
+          </div>
         </div>
 
         {/* CENTER: wheel */}
         <div className="center" style={{display:'flex', flexDirection:'column', alignItems:'center', gap:12}}>
           <div style={{display:'flex', gap:8, marginTop:4}}>
-            <button onClick={()=>changeWager(50)}  disabled={spinning} className="pill" style={{background:wager===50?'#2563eb':'#0b0b0b'}}>50 tanga</button>
-            <button onClick={()=>changeWager(100)} disabled={spinning} className="pill" style={{background:wager===100?'#2563eb':'#0b0b0b'}}>100 tanga</button>
-            <button onClick={()=>changeWager(200)} disabled={spinning} className="pill" style={{background:wager===200?'#2563eb':'#0b0b0b'}}>200 tanga</button>
+            <button onClick={()=>setWager(50) || getSegments(50)}  disabled={spinning} className="pill" style={{background:wager===50?'#2563eb':'#0b0b0b'}}>50 tanga</button>
+            <button onClick={()=>setWager(100)|| getSegments(100)} disabled={spinning} className="pill" style={{background:wager===100?'#2563eb':'#0b0b0b'}}>100 tanga</button>
+            <button onClick={()=>setWager(200)|| getSegments(200)} disabled={spinning} className="pill" style={{background:wager===200?'#2563eb':'#0b0b0b'}}>200 tanga</button>
           </div>
 
           <div style={{marginTop:4, color:'#cbd5e1'}}>
@@ -214,7 +240,7 @@ export default function WheelPage() {
           <button
             onClick={spin}
             disabled={spinning || (state.status==='SPINNING' && state.userId && state.userId !== me?.id)}
-            className="btn switch"
+            className="btn"
           >
             {spinning ? 'Aylanyapti…' : `Spin (-${wager})`}
           </button>
