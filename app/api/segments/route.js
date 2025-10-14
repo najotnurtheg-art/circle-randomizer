@@ -14,14 +14,12 @@ export async function GET(req) {
     return NextResponse.json({ error: 'tier must be 50/100/200' }, { status: 400 });
   }
 
-  // items for selected tier
   const items = await prisma.item.findMany({
     where: { tier: tierKey(W), isActive: true },
     orderBy: { createdAt: 'desc' },
     take: 100,
   });
 
-  // try to suggest a grand-prize from the next tier
   const grand = await prisma.item.findFirst({
     where: { tier: tierKey(nextTier(W)), isActive: true },
     orderBy: { createdAt: 'desc' },
