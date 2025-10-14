@@ -1,33 +1,24 @@
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 import { requireAdmin } from '@/app/lib/auth';
 
-const VALID_TIERS = new Set(['T50','T100','T200','T500']);
+const mapTier = (t) => {
+  const n = Number(t);
+  return n === 50 ? 'T50' : n === 100 ? 'T100' : n === 200 ? 'T200' : n === 500 ? 'T500' : null;
+};
 
 export async function PATCH(req, { params }) {
   try { requireAdmin(); } catch { return NextResponse.json({ error: 'forbidden' }, { status: 403 }); }
-
-  const body = await req.json().catch(()=> ({}));
+  const body = await req.json();
   const data = {};
-
-  if (typeof body.purchasable === 'boolean') data.purchasable = body.purchasable;
-  if (typeof body.isActive === 'boolean')     data.isActive = body.isActive;
-  if (typeof body.name === 'string')          data.name = body.name.trim();
-  if (typeof body.imageUrl === 'string')      data.imageUrl = body.imageUrl.trim();
-  if (typeof body.tier === 'string') {
-    if (!VALID_TIERS.has(body.tier)) {
-      return NextResponse.json({ error: 'invalid tier' }, { status: 400 });
-    }
-    data.tier = body.tier;
+  if (body.name) data.name = String(body.name);
+  if (body.tier) {
+    const t = mapTier(body.tier);
+    if (!t) return NextResponse.json({ error: 'tier must be 50/100/200/500' }, { status: 400 });
+    data.tier = t;
   }
-
-  if (Object.keys(data).length === 0) {
-    return NextResponse.json({ error: 'nothing to update' }, { status: 400 });
-  }
-
-  const it = await prisma.item.update({ where: { id: params.id }, data });
-  return NextResponse.json(it, { headers: { 'Cache-Control': 'no-store' } });
+  if (typeof body.isActive === 'boolean') data.isActive = body.isActive;
+  if (typeof body.imageUrl === 'string') data.imageUrl = body.imageUrl;
+  const item = await prisma.item.update({ where: { id: params.id }, data });
+  return NextResponse.json(item);
 }
