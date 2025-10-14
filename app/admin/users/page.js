@@ -27,12 +27,20 @@ export default function AdminUsers() {
   const rename = async (id, current) => {
     const name = prompt('New display name:', current || '');
     if (name === null) return;
-    const r = await fetch(`/api/admin/users/${id}`, {
+    await fetch(`/api/admin/users/${id}`, {
       method:'PATCH',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ displayName: name })
     });
-    if (!r.ok) { alert('Failed to rename'); return; }
+    load();
+  };
+
+  const toggleFeatured = async (id, value) => {
+    await fetch(`/api/admin/users/${id}`, {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ featured: !value })
+    });
     load();
   };
 
@@ -50,9 +58,10 @@ export default function AdminUsers() {
         <thead>
           <tr>
             <th>Display Name</th>
-            <th>Username (login)</th>
+            <th>Username</th>
             <th>Role</th>
             <th>Balance</th>
+            <th>Featured</th>
             <th>Joined</th>
             <th>Actions</th>
           </tr>
@@ -64,6 +73,12 @@ export default function AdminUsers() {
               <td>{u.username}</td>
               <td>{u.role}</td>
               <td>{u.balance}</td>
+              <td>
+                <label style={{cursor:'pointer'}}>
+                  <input type="checkbox" checked={!!u.featured} onChange={()=>toggleFeatured(u.id, u.featured)} />
+                  &nbsp;Show on main page
+                </label>
+              </td>
               <td>{new Date(u.createdAt).toLocaleString()}</td>
               <td>
                 <button onClick={()=>rename(u.id, u.displayName)}>Rename</button>
