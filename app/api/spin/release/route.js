@@ -16,15 +16,20 @@ export async function POST() {
     return NextResponse.json({ ok: true, released: false }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
-  // Only spinner can release, or release if already expired
-  const expired = s.spinStartAt && s.durationMs && (Date.now() - new Date(s.spinStartAt).getTime() > s.durationMs);
+  const expired = s.spinStartAt && s.durationMs &&
+    (Date.now() - new Date(s.spinStartAt).getTime() > Number(s.durationMs));
+
   if (s.userId !== me.sub && !expired) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
 
   await prisma.spinState.update({
     where: { id: ID },
-    data: { status: 'IDLE', userId: null, username: null, wager: null, segments: null, resultIndex: null, spinStartAt: null, durationMs: null },
+    data: {
+      status: 'IDLE',
+      userId: null, username: null, wager: null,
+      segments: [], resultIndex: null, spinStartAt: null, durationMs: null,
+    },
   });
 
   return NextResponse.json({ ok: true, released: true }, { headers: { 'Cache-Control': 'no-store' } });
