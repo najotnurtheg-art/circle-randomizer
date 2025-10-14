@@ -5,20 +5,22 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 
 export async function GET() {
-  const logs = await prisma.spinLog.findMany({
+  const rows = await prisma.spinLog.findMany({
     orderBy: { createdAt: 'desc' },
-    take: 50,
+    take: 5,
+    include: {  // pull nice name from User
+      // @ts-ignore - prisma relation via userId
+      user: { select: { displayName: true, username: true } }
+    }
   });
 
-  return NextResponse.json(
-    logs.map((l) => ({
-      id: l.id,
-      userId: l.userId,
-      username: l.username,
-      wager: l.wager,
-      prize: l.prize,
-      createdAt: l.createdAt,
-    })),
-    { headers: { 'Cache-Control': 'no-store' } }
-  );
+  const out = rows.map(r => ({
+    id: r.id,
+    prize: r.prize,
+    wager: r.wager,
+    when: r.createdAt,
+    displayName: r.user?.displayName || r.user?.username || r.username || 'Player'
+  }));
+
+  return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store' } });
 }
