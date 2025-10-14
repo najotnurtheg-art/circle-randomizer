@@ -16,95 +16,79 @@ export default function AdminCoins() {
     setUsers(await r.json());
   };
 
-  useEffect(()=>{ loadUsers(); }, []);
+  useEffect(() => { loadUsers(); }, []);
 
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return users;
+  const visible = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return users;
     return users.filter(u =>
-      u.displayName.toLowerCase().includes(needle) ||
-      u.username.toLowerCase().includes(needle)
+      (u.displayName || '').toLowerCase().includes(s) ||
+      (u.username || '').toLowerCase().includes(s)
     );
   }, [users, q]);
 
-  const submit = async (e) => {
-    e.preventDefault(); setErr(''); setOk('');
-    const val = parseInt(amount, 10);
-    if (!selectedId) { setErr('Pick a user'); return; }
-    if (!Number.isInteger(val) || val <= 0) { setErr('Enter a positive integer amount'); return; }
-
-    const r = await fetch('/api/admin/coins', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ userId: selectedId, amount: val })
+  const doGive = async () => {
+    setErr(''); setOk('');
+    if (!selectedId || !amount) { setErr('Select user and amount'); return; }
+    const r = await fetch('/api/admin/coins/give', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: selectedId, amount: Number(amount) }),
     });
-    const j = await r.json();
-    if (!r.ok) { setErr(j.error||'error'); return; }
-    setOk(`Sent ${val} to ${j.username}. New balance: ${j.balance}`);
+    if (!r.ok) { setErr((await r.json()).error || 'Failed'); return; }
+    setOk('Done');
     setAmount('');
-    loadUsers();
+    await loadUsers();
   };
 
-  const selectedUser = users.find(u => u.id === selectedId);
-
   return (
-    <div style={{padding:24, fontFamily:'system-ui, sans-serif'}}>
-      <h2>Admin: Give Coins</h2>
+    <div style={{padding: 20}}>
+      <h1>Admin: Coins</h1>
 
-      <form onSubmit={submit} style={{display:'grid', gap:10, maxWidth:520, marginTop:12}}>
-        <div style={{display:'flex', gap:8}}>
-          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search user..." style={{padding:8, flex:1}}/>
-          <button type="button" onClick={loadUsers}>Refresh</button>
-        </div>
+      <div style={{marginBottom: 12}}>
+        <input
+          placeholder="Search user..."
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          style={{padding: 8, width: 260}}
+        />
+      </div>
 
-        <select value={selectedId} onChange={e=>setSelectedId(e.target.value)} required style={{padding:8}}>
-          <option value="">— Pick a user —</option>
-          {filtered.map(u=>(
+      <div style={{display:'flex', gap:12, alignItems:'center', marginBottom:16}}>
+        <select value={selectedId} onChange={(e)=>setSelectedId(e.target.value)} style={{padding:8}}>
+          <option value="">Select user</option>
+          {users.map(u => (
             <option key={u.id} value={u.id}>
-              {u.displayName} ({u.username}) — balance: {u.balance}
+              {u.displayName || u.username || u.id} — {u.wallet?.balance ?? 0} coins
             </option>
           ))}
         </select>
-
         <input
           type="number"
-          min="1"
-          step="1"
+          placeholder="Amount"
           value={amount}
-          onChange={e=>setAmount(e.target.value)}
-          placeholder="Coins to send (e.g., 500)"
-          required
-          style={{padding:8}}
+          onChange={(e)=>setAmount(e.target.value)}
+          style={{padding:8, width:120}}
         />
-
-        <button style={{padding:'10px 16px', background:'black', color:'white', borderRadius:8}}>
-          Send
-        </button>
-      </form>
-
-      {err && <div style={{color:'red', marginTop:10}}>{err}</div>}
-      {ok && <div style={{color:'green', marginTop:10}}>{ok}</div>}
-
-      <div style={{marginTop:20}}>
-        {selectedUser && (
-          <div style={{fontSize:14, color:'#555'}}>
-            Selected: <b>{selectedUser.displayName}</b> ({selectedUser.username}) — Current balance: <b>{selectedUser.balance}</b>
-          </div>
-        )}
+        <button onClick={doGive} style={{padding:'8px 14px'}}>Give</button>
       </div>
 
-      <hr style={{margin:'20px 0'}}/>
+      {err && <p style={{color:'crimson'}}>{err}</p>}
+      {ok && <p style={{color:'green'}}>{ok}</p>}
 
-      <h3>All Users (latest 500)</h3>
-      <div style={{maxHeight:300, overflow:'auto', border:'1px solid #eee'}}>
-        <table border="1" cellPadding="6" style={{borderCollapse:'collapse', width:'100%'}}>
-          <thead><tr><th>Display</th><th>Username</th><th>Balance</th><th>Role</th><th>Joined</th></tr></thead>
+      <div style={{overflowX:'auto', marginTop:16}}>
+        <table border="1" cellPadding="6" style={{borderCollapse:'collapse', minWidth:700}}>
+          <thead>
+            <tr>
+              <th>Display</th><th>Username</th><th>Wallet</th><th>Role</th><th>Created</th>
+            </tr>
+          </thead>
           <tbody>
-            {users.map(u=>(
-              <tr key={u.id} style={{background: u.id===selectedId ? '#f1f5f9' : 'transparent'}}>
-                <td>{u.displayName}</td>
-                <td>{u.username}</td>
-                <td>{u.balance}</td>
+            {visible.map(u => (
+              <tr key={u.id}>
+                <td>{u.displayName || '-'}</td>
+                <td>{u.username || '-'}</td>
+                <td>{u.wallet?.balance ?? 0}</td>
                 <td>{u.role}</td>
                 <td>{new Date(u.createdAt).toLocaleString()}</td>
               </tr>
