@@ -222,6 +222,7 @@ export default function WheelPage() {
           });
         else setPopup({ text: `'${spin.username}' uchun yana bir aylantirish!`, imageUrl: null });
         getLatestWins();
+        releaseSpin(); // <<< IMPORTANT: free global lock when spin ends
       }
     };
     rafRef.current = requestAnimationFrame(run);
@@ -276,6 +277,10 @@ export default function WheelPage() {
   }, [popup]);
 
   // ---------- actions ----------
+  const releaseSpin = async () => {
+    try { await fetch('/api/spin/release', { method: 'POST' }); } catch {}
+  };
+
   const changeWager = (w) => {
     setWager(w);
     getSegments(w);
