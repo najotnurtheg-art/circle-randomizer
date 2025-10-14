@@ -12,31 +12,15 @@ export async function POST() {
     return NextResponse.json({ ok: true });
   }
 
-  const isAdmin = me.role === 'ADMIN';
-  const isOwner =
-    s.status === 'SPINNING' &&
-    s.userId === me.sub &&
-    s.spinStartAt &&
-    Date.now() - new Date(s.spinStartAt).getTime() > (s.durationMs || 5000) + 3000;
-
-  if (!isAdmin && !isOwner) {
+  // only spinner or admin can reset
+  if (s.userId !== me.sub && me.role !== 'ADMIN') {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
 
   await prisma.spinState.update({
     where: { id: 'global' },
-    data: {
-      status: 'IDLE',
-      userId: null,
-      username: null,
-      wager: null,
-      segments: [],
-      resultIndex: null,
-      spinStartAt: null,
-      durationMs: null,
-      popup: null,
-    },
+    data: { status: 'IDLE', userId: null, username: null, wager: null, segments: [], resultIndex: null }
   });
 
-  return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
+  return NextResponse.json({ ok: true });
 }
