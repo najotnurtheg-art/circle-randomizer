@@ -6,7 +6,7 @@ import { prisma } from '@/app/lib/prisma';
 
 const ID = 'global';
 
-function idle() {
+function idlePayload() {
   return {
     status: 'IDLE',
     userId: null,
@@ -23,7 +23,6 @@ export async function GET() {
   let s = await prisma.spinState.findUnique({ where: { id: ID } });
   if (!s) s = await prisma.spinState.create({ data: { id: ID, status: 'IDLE' } });
 
-  // expire lock if time passed
   if (s.status === 'SPINNING' && s.spinStartAt && s.durationMs) {
     const started = new Date(s.spinStartAt).getTime();
     const grace = 1500;
@@ -36,7 +35,7 @@ export async function GET() {
           segments: [], resultIndex: null, spinStartAt: null, durationMs: null,
         },
       });
-      return NextResponse.json(idle(), { headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json(idlePayload(), { headers: { 'Cache-Control': 'no-store' } });
     }
   }
 
@@ -51,7 +50,7 @@ export async function GET() {
         spinStartAt: s.spinStartAt,
         durationMs: s.durationMs || 10000,
       }
-    : idle();
+    : idlePayload();
 
   return NextResponse.json(payload, { headers: { 'Cache-Control': 'no-store' } });
 }
