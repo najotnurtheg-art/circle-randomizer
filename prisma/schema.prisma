@@ -22,9 +22,10 @@ enum PriceTier {
 model User {
   id           String   @id @default(cuid())
   username     String   @unique
-  displayName  String?             // NEW: pretty name for UI
+  displayName  String?
   password     String
   role         Role     @default(USER)
+  featured     Boolean  @default(false)
   createdAt    DateTime @default(now())
   wallet       Wallet?
 }
@@ -38,20 +39,22 @@ model Wallet {
 }
 
 model Item {
-  id        String    @id @default(cuid())
-  name      String
-  tier      PriceTier
-  isActive  Boolean   @default(true)
-  imageUrl  String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id           String   @id @default(cuid())
+  name         String
+  tier         PriceTier
+  isActive     Boolean  @default(true)
+  imageUrl     String?
+  purchasable  Boolean  @default(false)   // ← must exist
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
+
 model SpinState {
-  id          String   @id @default("global") // single row
-  status      String   @default("IDLE")       // IDLE | SPINNING
+  id          String   @id @default("global")
+  status      String   @default("IDLE")
   userId      String?
-  username    String?                          // used as display name in UI
+  username    String?
   wager       Int?
   segments    Json?
   resultIndex Int?

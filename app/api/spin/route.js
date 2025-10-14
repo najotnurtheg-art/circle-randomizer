@@ -5,116 +5,169 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 import { requireUser } from '@/app/lib/auth';
 
-const TIERS = [50, 100, 200];
-const nextTier = (v) => (v === 50 ? 100 : v === 100 ? 200 : 50);
-const tierKey  = (v) => (v === 50 ? 'T50' : v === 100 ? 'T100' : 'T200');
+// ---- helpers to build segments by wager ----
+const priceOfTier = (tier) => tier === 'T50' ? 50 : tier === 'T100' ? 100 : tier === 'T200' ? 200 : 500;
+const tierName = (w) => (w===50?'T50':w===100?'T100':w===200?'T200':'T500');
 
-function prizeText(seg){
-  if (!seg) return '';
-  if (seg.type === 'item') return seg.name;
-  if (seg.type === 'coins') return `Coins +${seg.amount}`;
-  return 'Another spin';
+// weights (rarity) for cross-tier “coins” prizes
+function coinWeightsFor(wager) {
+  // baseline 1 = normal, higher = harder to hit
+  // req: 50spin has 75 (2x harder), 100spin has 150 (2x harder), 200spin has 300 (2x harder)
+  // extra coins: 50spin has two 100coin prizes (3x harder)
+  //              100spin has one 50coin prize (2x easier -> weight 0.5) and one 200coin (3x harder)
+  //              200spin has one 100coin (2x easier -> 0.5) and two 500coin (5x harder)
+  if (wager === 50) return { bonus100Weight: 3, bonus75Weight: 2 };
+  if (wager === 100) return { bonus50Weight: 0.5, bonus200Weight: 3, bonus150Weight: 2 };
+  if (wager === 200) return { bonus100Weight: 0.5, bonus500Weight: 5, bonus300Weight: 2 };
+  return {};
+}
+
+function buildSegments(baseItems, wager) {
+  const segs = [];
+
+  // Base items for this tier
+  for (const it of baseItems) {
+    segs.push({ type: 'item', id: it.id, name: it.name, imageUrl: it.imageUrl || null });
+  }
+
+  // Add specials / coins according to rules
+  const w = coinWeightsFor(wager);
+
+  if (wager === 50) {
+    segs.push({ type: 'coins', amount: 75, weight: w.bonus75Weight || 2 });
+    segs.push({ type: 'coins', amount: 100, weight: w.bonus100Weight || 3 });
+    segs.push({ type: 'coins', amount: 100, weight: w.bonus100Weight || 3 });
+    segs.push({ type: 'again' });
+  }
+  if (wager === 100) {
+    segs.push({ type: 'coins', amount: 50,  weight: w.bonus50Weight  || 0.5 });
+    segs.push({ type: 'coins', amount: 200, weight: w.bonus200Weight || 3 });
+    segs.push({ type: 'coins', amount: 150, weight: w.bonus150Weight || 2 });
+    segs.push({ type: 'again' });
+  }
+  if (wager === 200) {
+    segs.push({ type: 'coins', amount: 100, weight: w.bonus100Weight || 0.5 });
+    segs.push({ type: 'coins', amount: 500, weight: w.bonus500Weight || 5 });
+    segs.push({ type: 'coins', amount: 500, weight: w.bonus500Weight || 5 });
+    segs.push({ type: 'coins', amount: 300, weight: w.bonus300Weight || 2 });
+    segs.push({ type: 'again' });
+  }
+
+  // default weight 1
+  return segs.map(s => ({ ...s, weight: s.weight ? Number(s.weight) : 1 }));
+}
+
+function pickIndexWeighted(segments) {
+  const weights = segments.map(s => Math.max(0.0001, Number(s.weight || 1)));
+  const sum = weights.reduce((a,b)=>a+b, 0);
+  let r = Math.random() * sum;
+  for (let i=0;i<weights.length;i++) {
+    if (r < weights[i]) return i;
+    r -= weights[i];
+  }
+  return segments.length - 1;
 }
 
 export async function POST(req) {
   let me;
   try { me = requireUser(); } catch { return NextResponse.json({ error: 'unauth' }, { status: 401 }); }
 
-  const { wager } = await req.json();
-  const W = Number(wager);
-  if (!TIERS.includes(W)) return NextResponse.json({ error: 'wager must be 50/100/200' }, { status: 400 });
+  const body = await req.json().catch(()=>({}));
+  const wager = Number(body.wager || 50);
+  const tier = tierName(wager);
 
-  // Load DB user for displayName
-  const dbUser = await prisma.user.findUnique({ where: { id: me.sub } });
-  const niceName = dbUser?.displayName || dbUser?.username || 'Player';
-
-  // Ensure state row exists
-  let state = await prisma.spinState.findUnique({ where: { id: 'global' } });
-  if (!state) state = await prisma.spinState.create({ data: { id: 'global', status: 'IDLE' } });
-
-  // STRICT lock: if SPINNING, nobody can start a new spin
-  if (state.status !== 'IDLE') {
-    return NextResponse.json({ error: `busy: ${state.username || 'another user'} is spinning` }, { status: 409 });
+  // check global lock
+  const lock = await prisma.spinState.findUnique({ where: { id: 'global' } });
+  if (lock && lock.status === 'SPINNING' && lock.userId && lock.userId !== me.sub) {
+    return NextResponse.json({ error: `busy` }, { status: 409 });
   }
 
-  // Balance check
-  const wallet = await prisma.wallet.findUnique({ where: { userId: me.sub } });
-  if (!wallet || wallet.balance < W) return NextResponse.json({ error: 'insufficient_funds' }, { status: 400 });
+  // balance check
+  const user = await prisma.user.findUnique({ where: { id: me.sub } });
+  if (!user) return NextResponse.json({ error: 'user not found' }, { status: 404 });
+  if ((user.balance || 0) < wager) {
+    return NextResponse.json({ error: 'not enough coins' }, { status: 400 });
+  }
 
-  // Items for this tier
+  // fetch active items of this tier
   const items = await prisma.item.findMany({
-    where: { tier: tierKey(W), isActive: true },
-    orderBy: { createdAt: 'desc' }
+    where: { isActive: true, tier: tier },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
   });
 
-  // Next-tier random item
-  const nextItems = await prisma.item.findMany({ where: { tier: tierKey(nextTier(W)), isActive: true } });
-  const randomNext = nextItems.length ? nextItems[Math.floor(Math.random() * nextItems.length)] : null;
-
-  // 500 grand prize inside 200-spin
-  let grandPrize = null;
-  if (W === 200) {
-    const gp = await prisma.item.findMany({ where: { tier: 'T500', isActive: true } });
-    if (gp.length) grandPrize = gp[Math.floor(Math.random() * gp.length)];
+  const segments = buildSegments(items, wager);
+  if (!segments.length) {
+    return NextResponse.json({ error: 'no segments' }, { status: 400 });
   }
 
-  const segments = [
-    ...items.map(i => ({ type:'item', name:i.name, tier:W, imageUrl:i.imageUrl||null })),
-    { type:'another_spin' },
-    { type:'coins', amount: nextTier(W) },
-  ];
-  if (randomNext) segments.push({ type:'item', name:randomNext.name, tier:nextTier(W), imageUrl:randomNext.imageUrl||null });
-  if (grandPrize) segments.push({ type:'item', name:grandPrize.name, tier:500, imageUrl:grandPrize.imageUrl||null, grand:true });
+  // pick a result
+  const resultIndex = pickIndexWeighted(segments);
 
-  if (!segments.length) return NextResponse.json({ error: 'no items for this tier yet' }, { status: 400 });
+  // charge immediately (prevents double-spend)
+  const newBal = user.balance - wager;
+  await prisma.user.update({ where: { id: me.sub }, data: { balance: newBal } });
 
-  // Decide result now (shared)
-  const idx = Math.floor(Math.random() * segments.length);
-  const result = segments[idx];
-
-  // 10s spin timing
+  const now = new Date();
   const durationMs = 10000;
-  const spinStartAt = new Date();
 
-  // Debit + lock with pretty name
-  await prisma.$transaction(async (tx) => {
-    await tx.wallet.update({ where: { userId: me.sub }, data: { balance: { decrement: W } } });
-    await tx.spinState.update({
-      where: { id: 'global' },
-      data: {
-        status: 'SPINNING',
-        userId: me.sub,
-        username: niceName,   // show pretty name to everyone
-        wager: W,
-        segments,
-        resultIndex: idx,
-        spinStartAt,
-        durationMs
-      }
+  // set shared state
+  await prisma.spinState.upsert({
+    where: { id: 'global' },
+    create: {
+      id: 'global',
+      status: 'SPINNING',
+      userId: me.sub,
+      username: user.displayName || user.username || 'Player',
+      wager,
+      segments,
+      resultIndex,
+      spinStartAt: now,
+      durationMs,
+    },
+    update: {
+      status: 'SPINNING',
+      userId: me.sub,
+      username: user.displayName || user.username || 'Player',
+      wager,
+      segments,
+      resultIndex,
+      spinStartAt: now,
+      durationMs,
+    },
+  });
+
+  // Record reward after spin ends via a job? For now we return popup data for client
+  const seg = segments[resultIndex];
+  let popup = null;
+  if (seg.type === 'item') {
+    popup = { text: `'${user.displayName || user.username}' siz '${seg.name}' yutib oldingiz🎉`, imageUrl: seg.imageUrl || null };
+    // store win
+    await prisma.win.create({
+      data: { userId: me.sub, prize: seg.name, coins: 0, imageUrl: seg.imageUrl || null }
     });
-  });
+  } else if (seg.type === 'coins') {
+    popup = { text: `'${user.displayName || user.username}' siz +${seg.amount} tangalarni yutib oldingiz🎉` };
+    await prisma.user.update({ where: { id: me.sub }, data: { balance: newBal + seg.amount } });
+    await prisma.win.create({
+      data: { userId: me.sub, prize: `+${seg.amount} coins`, coins: seg.amount }
+    });
+  } // type 'again' gives no extra records
 
-  // Coins payout immediately
-  if (result.type === 'coins') {
-    await prisma.wallet.update({ where: { userId: me.sub }, data: { balance: { increment: result.amount } } });
-  }
-
-  // Log reward (keep stored "username" as stable login name)
-  await prisma.spinLog.create({
-    data: { userId: me.sub, username: dbUser.username, wager: W, prize: prizeText(result) }
-  });
-
-  const bal = await prisma.wallet.findUnique({ where: { userId: me.sub } });
-
-  return NextResponse.json({
-    status: 'SPINNING',
-    userId: me.sub,
-    username: niceName,    // pretty
-    segments,
-    resultIndex: idx,
-    spinStartAt,
-    durationMs,
-    result,                // clients show after stop
-    balance: bal?.balance ?? 0
-  }, { headers: { 'Cache-Control': 'no-store' } });
+  // response the client animates with
+  return NextResponse.json(
+    {
+      status: 'SPINNING',
+      userId: me.sub,
+      username: user.displayName || user.username || 'Player',
+      wager,
+      segments,
+      resultIndex,
+      spinStartAt: now.toISOString(),
+      durationMs,
+      balance: (await prisma.user.findUnique({ where: { id: me.sub } }))?.balance || 0,
+      popup, // client will show after stop
+    },
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
 }
