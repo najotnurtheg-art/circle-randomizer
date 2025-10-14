@@ -35,7 +35,7 @@ export default function WheelPage() {
   const [allItems, setAllItems] = useState([]);
   const [featuredUsers, setFeaturedUsers] = useState([]);
   const [latestWins, setLatestWins] = useState([]);
-  const [storeItems, setStoreItems] = useState([]); // store items
+  const [storeItems, setStoreItems] = useState([]);
 
   const currentSpinKey = useRef(null);
 
@@ -56,7 +56,7 @@ export default function WheelPage() {
     const cx = size / 2,
       cy = size / 2,
       r = size / 2 - 8;
-    const n = s.length;
+    const n = Math.max(1, s.length);
     const step = (2 * Math.PI) / n;
     ctx.save();
     ctx.translate(cx, cy);
@@ -73,7 +73,7 @@ export default function WheelPage() {
       ctx.textAlign = 'center';
       ctx.font = 'bold 14px system-ui';
       ctx.fillStyle = '#111827';
-      ctx.fillText(label(s[i]), r * 0.65, 6);
+      ctx.fillText(label(s[i] || {}), r * 0.65, 6);
       ctx.restore();
     }
     ctx.restore();
@@ -103,12 +103,12 @@ export default function WheelPage() {
     return true;
   };
   const getSegments = async (w) => {
-    const r = await fetch(`/api/segments?tier=${w}`);
+    const r = await fetch(`/api/segments?tier=${w}`, { cache: 'no-store' });
     const j = await r.json();
-    if (j.segments) setSegments(j.segments);
+    if (j.segments && Array.isArray(j.segments)) setSegments(j.segments);
   };
   const getAllItems = async () => {
-    const r = await fetch('/api/items/all');
+    const r = await fetch('/api/items/all', { cache: 'no-store' });
     setAllItems(await r.json());
   };
   const getFeatured = async () => {
@@ -119,7 +119,6 @@ export default function WheelPage() {
     const r = await fetch('/api/spin/latest', { cache: 'no-store' });
     setLatestWins(await r.json());
   };
-  // ABSOLUTE fetch for store list (robust in embeds/proxies)
   const getStore = async () => {
     try {
       const url =
@@ -173,27 +172,54 @@ export default function WheelPage() {
     }
   };
 
-  // ---------- live spin sync ----------
-  const startSharedSpin = (spin) => {
-    if (
-      !spin ||
-      !spin.segments?.length ||
-      typeof spin.resultIndex !== 'number' ||
-      !spin.spinStartAt
-    )
+  // ---------- spin normalize + animation ----------
+  const normalizeSpin = (raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+
+    // Prefer server-provided values
+    let segs = Array.isArray(raw.segments) && raw.segments.length ? raw.segments : segments;
+    if (!Array.isArray(segs) || segs.length === 0) return null;
+
+    const idx =
+      typeof raw.resultIndex === 'number' && raw.resultIndex >= 0 && raw.resultIndex < segs.length
+        ? raw.resultIndex
+        : null;
+    if (idx === null) return null;
+
+    const startAt = raw.spinStartAt ? new Date(raw.spinStartAt) : new Date();
+    const dur = Number(raw.durationMs || 10000);
+    const username = raw.username || (me?.displayName || me?.username || 'Player');
+
+    return {
+      userId: raw.userId || me?.id || 'me',
+      username,
+      segments: segs,
+      resultIndex: idx,
+      spinStartAt: startAt.toISOString(),
+      durationMs: isFinite(dur) && dur > 0 ? dur : 10000,
+    };
+  };
+
+  const startSharedSpin = (rawSpin) => {
+    const spin = normalizeSpin(rawSpin);
+    if (!spin) {
+      console.warn('spin payload invalid', rawSpin);
       return;
+    }
+
     const key = `${spin.userId}-${spin.resultIndex}-${spin.spinStartAt}`;
     if (currentSpinKey.current === key) return;
     currentSpinKey.current = key;
 
     setSegments(spin.segments);
+
     const n = spin.segments.length;
     const step = (2 * Math.PI) / n;
     const target = TOP_ANGLE - (spin.resultIndex * step + step / 2);
     const turns = 6;
     const final = target + turns * 2 * Math.PI;
     const duration = Number(spin.durationMs || 10000);
-    const startAtMs = new Date(spin.spinStartAt).getTime();
+    const startAtMs = new Date(spin.spinStartAt).getTime() || Date.now();
     const startAngle = angle % (2 * Math.PI);
 
     const perfOffset = Math.max(0, Date.now() - startAtMs);
@@ -222,7 +248,7 @@ export default function WheelPage() {
           });
         else setPopup({ text: `'${spin.username}' uchun yana bir aylantirish!`, imageUrl: null });
         getLatestWins();
-        releaseSpin(); // <<< IMPORTANT: free global lock when spin ends
+        releaseSpin(); // free global lock at the end
       }
     };
     rafRef.current = requestAnimationFrame(run);
@@ -232,7 +258,7 @@ export default function WheelPage() {
     const r = await fetch('/api/spin/state', { cache: 'no-store' });
     const j = await r.json();
     setState(j);
-    if (j.status === 'SPINNING') startSharedSpin(j);
+    if (j && j.status === 'SPINNING') startSharedSpin(j);
   };
 
   // ---------- mount ----------
@@ -313,6 +339,7 @@ export default function WheelPage() {
       setSpinning(false);
       return;
     }
+    // Start animation even if server omitted some fields
     startSharedSpin(j);
     setBalance(j.balance || 0);
     setSpinning(false);
