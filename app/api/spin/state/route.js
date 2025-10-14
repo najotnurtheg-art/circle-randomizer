@@ -21,16 +21,14 @@ function idle() {
 }
 
 export async function GET() {
-  // ensure row
   let s = await prisma.spinState.findUnique({ where: { id: ID } });
   if (!s) {
     s = await prisma.spinState.create({ data: { id: ID, status: 'IDLE' } });
   }
 
-  // auto-reset if spin expired
   if (s.status === 'SPINNING' && s.spinStartAt && s.durationMs) {
     const started = new Date(s.spinStartAt).getTime();
-    const grace = 3_000; // small grace to allow client to finish animation
+    const grace = 3000;
     if (Date.now() > started + Number(s.durationMs) + grace) {
       s = await prisma.spinState.update({
         where: { id: ID },
@@ -50,7 +48,6 @@ export async function GET() {
     }
   }
 
-  // return current payload (without DB-specific fields)
   const payload =
     s.status === 'SPINNING'
       ? {
