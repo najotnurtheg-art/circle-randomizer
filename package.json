@@ -3,18 +3,20 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "next build",
     "start": "next start",
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@prisma/client": "^5.18.0",
+    "@prisma/client": "5.16.1",
+    "@vercel/blob": "0.21.0",
+    "bcryptjs": "2.4.3",
+    "jsonwebtoken": "9.0.2",
     "next": "14.2.5",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "jsonwebtoken": "^9.0.2"
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
   },
   "devDependencies": {
-    "prisma": "^5.18.0"
+    "prisma": "5.16.1"
   }
 }
