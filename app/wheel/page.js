@@ -25,8 +25,10 @@ export default function WheelPage() {
   const [popup, setPopup] = useState(null);
   const [showList, setShowList] = useState(false);
   const [allItems, setAllItems] = useState([]);
+  const [featuredUsers, setFeaturedUsers] = useState([]);
   const currentSpinKey = useRef(null);
 
+  // ---------- drawing ----------
   const draw = (a, segs) => {
     const canvas = canvasRef.current; if (!canvas) return;
     const size = 360; const dpr = window.devicePixelRatio || 1;
@@ -42,10 +44,12 @@ export default function WheelPage() {
       ctx.fillText(label(s[i]), r*0.65, 6); ctx.restore();
     }
     ctx.restore();
+    // top pointer
     ctx.beginPath(); ctx.moveTo(cx, 8); ctx.lineTo(cx-12, 28); ctx.lineTo(cx+12, 28); ctx.closePath(); ctx.fillStyle='#ef4444'; ctx.fill();
   };
   useEffect(()=>{ draw(angle, segments); },[angle, segments]);
 
+  // ---------- helpers ----------
   const getMe = async () => {
     const r = await fetch('/api/me'); if (!r.ok) { setMe(null); return false; }
     const j = await r.json(); setMe(j); setBalance(j.balance||0); return true;
@@ -55,6 +59,7 @@ export default function WheelPage() {
     if (j.segments) setSegments(j.segments);
   };
   const getAllItems = async () => { const r = await fetch('/api/items/all'); setAllItems(await r.json()); };
+  const getFeatured = async () => { const r = await fetch('/api/users/featured', { cache:'no-store' }); setFeaturedUsers(await r.json()); };
 
   const ensureTelegramAutoLogin = async () => {
     const ok = await getMe(); if (ok) return true;
@@ -75,6 +80,7 @@ export default function WheelPage() {
     } catch { return false; }
   };
 
+  // ---------- live spin sync ----------
   const startSharedSpin = (spin) => {
     if (!spin || !spin.segments?.length || typeof spin.resultIndex !== 'number' || !spin.spinStartAt) return;
     const key = `${spin.userId}-${spin.resultIndex}-${spin.spinStartAt}`;
@@ -120,19 +126,22 @@ export default function WheelPage() {
     if (j.status === 'SPINNING') startSharedSpin(j);
   };
 
+  // ---------- mount ----------
   useEffect(() => {
     (async () => {
       await ensureTelegramAutoLogin();
       await getSegments(wager);
+      await getFeatured();
       await pollState();
-      const id = setInterval(pollState, 1000);
-      return () => { clearInterval(id); if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+      const id1 = setInterval(pollState, 1000);
+      const id2 = setInterval(getFeatured, 3000); // refresh balances every 3s
+      return () => { clearInterval(id1); clearInterval(id2); if (rafRef.current) cancelAnimationFrame(rafRef.current); };
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ---------- actions ----------
   const changeWager = (w) => { setWager(w); getSegments(w); };
-
   const spin = async () => {
     setErr(''); setPopup(null);
     const authed = await getMe();
@@ -140,12 +149,10 @@ export default function WheelPage() {
       const ok = await ensureTelegramAutoLogin();
       if (!ok) { setErr('Iltimos, /login orqali kiring'); return; }
     }
-
     if (state.status === 'SPINNING' && state.userId && state.userId !== me?.id) {
       setErr(`Band: hozir ${state.username} aylanmoqda`);
       return;
     }
-
     setSpinning(true);
     const r = await fetch('/api/spin', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ wager }) });
     const j = await r.json();
@@ -155,65 +162,117 @@ export default function WheelPage() {
     setSpinning(false);
   };
 
+  // ---------- UI ----------
   return (
-    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:12, padding:24, fontFamily:'system-ui, sans-serif' }}>
-      <h2 style={{ fontSize:24, fontWeight:600 }}>Wheel</h2>
-      <div>Balance: <b>{balance}</b> coins</div>
+    <div style={{ padding:24, fontFamily:'system-ui, sans-serif', color:'#e5e7eb', background:'#111', minHeight:'100vh' }}>
+      {/* responsive layout */}
+      <style>{`
+        .wrap { display:grid; grid-template-columns: 260px 1fr 260px; gap:20px; align-items:start; }
+        @media (max-width: 900px) {
+          .wrap { grid-template-columns: 1fr; }
+          .side { order: 3; }  /* both side panels move below */
+          .side-right { order: 4; }
+          .center { order: 2; }
+        }
+        .card { background:#1f2937; border:1px solid #374151; border-radius:12px; padding:12px; }
+        .title { font-weight:700; margin-bottom:8px; color:#fff; }
+        .pill { padding:8px 12px; border-radius:8px; border:1px solid #374151; background:#0b0b0b; color:#fff; }
+        .btn { padding:10px 16px; border-radius:12px; background:#000; color:#fff; border:1px solid #374151; }
+        .btn.switch { background: ${spinning ? '#222' : '#000'}; }
+        a { color:#93c5fd; }
+      `}</style>
 
-      <div style={{display:'flex', gap:8, marginTop:8}}>
-        <button onClick={()=>changeWager(50)}  disabled={spinning} style={{padding:'8px 12px', borderRadius:8, border:'1px solid #ddd', background: wager===50?'#111':'#fff', color:wager===50?'#fff':'#111'}}>50 tanga</button>
-        <button onClick={()=>changeWager(100)} disabled={spinning} style={{padding:'8px 12px', borderRadius:8, border:'1px solid #ddd', background: wager===100?'#111':'#fff', color:wager===100?'#fff':'#111'}}>100 tanga</button>
-        <button onClick={()=>changeWager(200)} disabled={spinning} style={{padding:'8px 12px', borderRadius:8, border:'1px solid #ddd', background: wager===200?'#111':'#fff', color:wager===200?'#fff':'#111'}}>200 tanga</button>
-      </div>
+      <div className="wrap">
+        {/* LEFT: terms */}
+        <div className="side card">
+          <div className="title">Qoidalar (tanga olish)</div>
+          <ul style={{margin:0, paddingLeft:16, lineHeight:1.6}}>
+            <li>Onlayn <b>300.000 so‘m</b> = <b>10 tanga</b></li>
+            <li>Oflayn <b>1.000.000 so‘m</b> = <b>10 tanga</b></li>
+          </ul>
+          <div style={{fontSize:12, opacity:.8, marginTop:6}}>Admin bu ro‘yxatni kerak bo‘lsa keyin kengaytirishi mumkin.</div>
+        </div>
 
-      <div>
-        {state.status === 'SPINNING'
-          ? <b>Hozir: {state.username} aylanmoqda</b>
-          : <span>Keyingi o‘yinchi tayyor!</span>}
-      </div>
-
-      <canvas ref={canvasRef} style={{ borderRadius:'9999px', boxShadow:'0 10px 30px rgba(0,0,0,0.12)' }} />
-
-      <button
-        onClick={spin}
-        disabled={spinning || (state.status==='SPINNING' && state.userId && state.userId !== me?.id)}
-        style={{ padding:'10px 16px', borderRadius:12, background:'black', color:'white', opacity: spinning?0.5:1 }}>
-        {spinning ? 'Aylanyapti…' : `Spin (-${wager})`}
-      </button>
-
-      <div style={{marginTop:8, width:360}}>
-        <button onClick={()=>{ setShowList(!showList); if(!allItems.length) getAllItems(); }} style={{width:'100%', padding:'8px 12px', borderRadius:8, border:'1px solid #ddd', background:'#fff'}}>
-          Barcha sovg‘alar (narxlari bilan) {showList ? '▲' : '▼'}
-        </button>
-        {showList && (
-          <div style={{border:'1px solid #eee', borderTop:'none', padding:10, borderRadius:'0 0 8px 8px', background:'#fff', maxHeight:260, overflow:'auto'}}>
-            {[50,100,200,500].map(tier => (
-              <div key={tier} style={{marginBottom:8}}>
-                <div style={{fontWeight:700}}>{tier} tanga</div>
-                <ul style={{margin:0, paddingLeft:18}}>
-                  {allItems.filter(i=>i.tier===tier).map(i=>(
-                    <li key={i.id}>{i.name}{i.imageUrl ? ' 🖼️' : ''}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+        {/* CENTER: wheel */}
+        <div className="center" style={{display:'flex', flexDirection:'column', alignItems:'center', gap:12}}>
+          <div style={{display:'flex', gap:8, marginTop:4}}>
+            <button onClick={()=>changeWager(50)}  disabled={spinning} className="pill" style={{background:wager===50?'#2563eb':'#0b0b0b'}}>50 tanga</button>
+            <button onClick={()=>changeWager(100)} disabled={spinning} className="pill" style={{background:wager===100?'#2563eb':'#0b0b0b'}}>100 tanga</button>
+            <button onClick={()=>changeWager(200)} disabled={spinning} className="pill" style={{background:wager===200?'#2563eb':'#0b0b0b'}}>200 tanga</button>
           </div>
-        )}
+
+          <div style={{marginTop:4, color:'#cbd5e1'}}>
+            {state.status === 'SPINNING'
+              ? <b>Hozir: {state.username} aylanmoqda</b>
+              : <span>Keyingi o‘yinchi tayyor!</span>}
+          </div>
+
+          <canvas ref={canvasRef} style={{ borderRadius:'9999px', boxShadow:'0 10px 30px rgba(0,0,0,0.35)', background:'#fff' }} />
+
+          <div>Balans: <b>{balance}</b> tanga</div>
+
+          <button
+            onClick={spin}
+            disabled={spinning || (state.status==='SPINNING' && state.userId && state.userId !== me?.id)}
+            className="btn switch"
+          >
+            {spinning ? 'Aylanyapti…' : `Spin (-${wager})`}
+          </button>
+
+          {/* items dropdown */}
+          <div style={{marginTop:8, width:360, maxWidth:'100%'}}>
+            <button onClick={()=>{ setShowList(!showList); if(!allItems.length) getAllItems(); }} className="pill" style={{width:'100%'}}>
+              Barcha sovg‘alar (narxlari bilan) {showList ? '▲' : '▼'}
+            </button>
+            {showList && (
+              <div className="card" style={{marginTop:6, maxHeight:260, overflow:'auto'}}>
+                {[50,100,200,500].map(tier => (
+                  <div key={tier} style={{marginBottom:8}}>
+                    <div className="title" style={{marginBottom:4, fontSize:14}}>{tier} tanga</div>
+                    <ul style={{margin:0, paddingLeft:18}}>
+                      {allItems.filter(i=>i.tier===tier).map(i=>(
+                        <li key={i.id} style={{color:'#e5e7eb'}}>{i.name}{i.imageUrl ? ' 🖼️' : ''}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {err && <div style={{color:'#fca5a5'}}>{err}</div>}
+        </div>
+
+        {/* RIGHT: featured users + balances */}
+        <div className="side side-right card">
+          <div className="title">Ishtirokchilar balansi</div>
+          {featuredUsers.length === 0 ? (
+            <div style={{opacity:.8}}>Hozircha ro‘yxat bo‘sh. Admin “Users” sahifasida belgilaydi.</div>
+          ) : (
+            <ul style={{margin:0, paddingLeft:0, listStyle:'none', lineHeight:1.6}}>
+              {featuredUsers.map(u=>(
+                <li key={u.id} style={{display:'flex', justifyContent:'space-between', gap:8, padding:'4px 0', borderBottom:'1px dashed #374151'}}>
+                  <span>{u.displayName}</span>
+                  <b>{u.balance}</b>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div style={{fontSize:12, opacity:.8, marginTop:6}}>Ro‘yxat har 3 soniyada yangilanadi.</div>
+        </div>
       </div>
 
+      {/* POPUP */}
       {popup && (
         <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:50}}
              onClick={()=>setPopup(null)}>
           <div style={{background:'white', padding:20, borderRadius:12, maxWidth:320, textAlign:'center'}} onClick={(e)=>e.stopPropagation()}>
             {popup.imageUrl && <img src={popup.imageUrl} alt="prize" style={{width:'100%', borderRadius:8, marginBottom:12}}/>}
-            <div style={{fontWeight:700, marginBottom:8}}>{popup.text}</div>
+            <div style={{fontWeight:700, marginBottom:8, color:'#111'}}>{popup.text}</div>
             <button onClick={()=>setPopup(null)} style={{padding:'8px 12px', borderRadius:8, background:'black', color:'white'}}>OK</button>
           </div>
         </div>
       )}
-
-      <p><a href="/">← Home</a></p>
-      {err && <div style={{color:'red', marginTop:8}}>{err}</div>}
     </div>
   );
 }
