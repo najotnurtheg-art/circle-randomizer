@@ -14,7 +14,7 @@ export async function GET() {
     take: 500,
   });
 
-  const out = rows.map(i => ({
+  const out = rows.map((i) => ({
     id: i.id,
     name: i.name,
     tier: i.tier,
