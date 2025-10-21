@@ -1,146 +1,165 @@
+// app/api/spin/route.js
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
-import { requireUser } from '@/app/lib/auth';
+import { requireUser } from '@/app/lib/auth'; // must return the current user (id, username/displayName)
 
-const STATE_ID = 'global';
-const tierFromWager = (w) => (w === 50 ? 'T50' : w === 100 ? 'T100' : w === 200 ? 'T200' : 'T500');
+const W_HARDEST = 1;
+const W_NORMAL  = 3;
+const W_AGAIN   = 3;
 
-function coinWeightsFor(w) {
-  if (w === 50)  return { w75: 2,   w100: 3 };          // 50-spin: 75 (2x harder), 100 (3x harder) x2
-  if (w === 100) return { w50: 0.5, w200: 3, w150: 2 }; // 100-spin: 50 (2x easier), 200 (3x harder), 150 (2x harder)
-  if (w === 200) return { w100: 0.5, w500: 5, w300: 2 }; // 200-spin: 100 (2x easier), 500 (5x harder) x2, 300 (2x harder)
-  return {};
+function cyclePick(arr, n) {
+  const out = [];
+  if (arr.length === 0) return out;
+  for (let i = 0; i < n; i++) out.push(arr[i % arr.length]);
+  return out;
 }
 
-function buildSegments(items, wager) {
-  const segs = items.map(i => ({
-    type: 'item',
-    id: i.id,
-    name: i.name,
-    imageUrl: i.imageUrl || null,
-    weight: 1,
-  }));
-
-  const W = coinWeightsFor(wager);
+function buildSegments({ items50, items100, items200, items500 }, wager) {
+  const segs = [];
 
   if (wager === 50) {
-    segs.push({ type: 'coins', amount: 75,  weight: W.w75  ?? 2 });
-    segs.push({ type: 'coins', amount: 100, weight: W.w100 ?? 3 });
-    segs.push({ type: 'coins', amount: 100, weight: W.w100 ?? 3 });
-    segs.push({ type: 'again', weight: 1 });
-  }
-  if (wager === 100) {
-    segs.push({ type: 'coins', amount: 50,  weight: W.w50  ?? 0.5 });
-    segs.push({ type: 'coins', amount: 200, weight: W.w200 ?? 3 });
-    segs.push({ type: 'coins', amount: 150, weight: W.w150 ?? 2 });
-    segs.push({ type: 'again', weight: 1 });
-  }
-  if (wager === 200) {
-    segs.push({ type: 'coins', amount: 100, weight: W.w100 ?? 0.5 });
-    segs.push({ type: 'coins', amount: 500, weight: W.w500 ?? 5 });
-    segs.push({ type: 'coins', amount: 500, weight: W.w500 ?? 5 });
-    segs.push({ type: 'coins', amount: 300, weight: W.w300 ?? 2 });
-    segs.push({ type: 'again', weight: 1 });
+    for (const it of items50) segs.push({ type:'item', name: it.name, imageUrl: it.imageUrl || null, weight: W_NORMAL });
+    for (const it of cyclePick(items100, 2)) segs.push({ type:'item', name: it.name, imageUrl: it.imageUrl || null, weight: W_HARDEST });
+    segs.push({ type:'coins', amount: 75, weight: W_HARDEST });
+    segs.push({ type:'again', weight: W_AGAIN });
   }
 
-  return segs.map(s => ({ ...s, weight: Math.max(0.0001, Number(s.weight || 1)) }));
+  if (wager === 100) {
+    for (const it of items100) segs.push({ type:'item', name: it.name, imageUrl: it.imageUrl || null, weight: W_NORMAL });
+    for (const it of cyclePick(items200, 2)) segs.push({ type:'item', name: it.name, imageUrl: it.imageUrl || null, weight: W_HARDEST });
+    for (const it of cyclePick(items50, 2))  segs.push({ type:'item', name: it.name, imageUrl: it.imageUrl || null, weight: W_HARDEST });
+    segs.push({ type:'coins', amount: 150, weight: W_HARDEST });
+    segs.push({ type:'again', weight: W_AGAIN });
+  }
+
+  if (wager === 200) {
+    for (const it of items200) segs.push({ type:'item', name: it.name, imageUrl: it.imageUrl || null, weight: W_NORMAL });
+    for (const it of cyclePick(items500, 2)) segs.push({ type:'item', name: it.name, imageUrl: it.imageUrl || null, weight: W_HARDEST });
+    for (const it of cyclePick(items100, 2)) segs.push({ type:'item', name: it.name, imageUrl: it.imageUrl || null, weight: W_HARDEST });
+    segs.push({ type:'coins', amount: 300, weight: W_HARDEST });
+    segs.push({ type:'again', weight: W_AGAIN });
+  }
+
+  return segs;
 }
 
 function pickIndexWeighted(segments) {
-  const total = segments.reduce((a, s) => a + s.weight, 0);
+  const total = segments.reduce((s, x) => s + (x.weight || 1), 0);
   let r = Math.random() * total;
   for (let i = 0; i < segments.length; i++) {
-    if (r < segments[i].weight) return i;
-    r -= segments[i].weight;
+    r -= (segments[i].weight || 1);
+    if (r <= 0) return i;
   }
   return segments.length - 1;
 }
 
 export async function POST(req) {
-  // auth
   let me;
-  try { me = requireUser(); } catch { return NextResponse.json({ error: 'unauth' }, { status: 401 }); }
+  try { me = await requireUser(); } // your helper should throw if unauthenticated
+  catch { return NextResponse.json({ error: 'auth' }, { status: 401 }); }
 
-  const body = await req.json().catch(() => ({}));
-  const wager = [50, 100, 200].includes(Number(body.wager)) ? Number(body.wager) : 50;
-  const tier = tierFromWager(wager);
-
-  // lock (respect expiry/grace)
-  const existing = await prisma.spinState.findUnique({ where: { id: STATE_ID } });
-  if (existing && existing.status === 'SPINNING' && existing.userId && existing.spinStartAt && existing.durationMs) {
-    const started = new Date(existing.spinStartAt).getTime();
-    const locked = Date.now() <= started + Number(existing.durationMs) + 1500;
-    if (locked && existing.userId !== me.sub) {
-      return NextResponse.json({ error: 'busy' }, { status: 409 });
-    }
+  const { wager } = await req.json().catch(() => ({}));
+  const W = Number(wager);
+  if (![50,100,200].includes(W)) {
+    return NextResponse.json({ error: 'bad wager' }, { status: 400 });
   }
 
-  // user & wallet
-  const user = await prisma.user.findUnique({ where: { id: me.sub } });
-  const display = (user && (user.displayName || user.username)) || 'Player';
-  const wallet = await prisma.wallet.findUnique({ where: { userId: me.sub } });
-  const bal = Number(wallet?.balance ?? 0);
-  if (bal < wager) return NextResponse.json({ error: 'not enough coins' }, { status: 400 });
+  // Load wallet & lock state
+  const wallet = await prisma.wallet.findUnique({ where: { userId: me.id } });
+  const balance = wallet?.balance ?? 0;
+  if (balance < W) {
+    return NextResponse.json({ error: 'not enough coins' }, { status: 400 });
+  }
 
-  // build wheel
-  const items = await prisma.item.findMany({
-    where: { isActive: true, tier },
-    orderBy: { createdAt: 'desc' },
-    take: 100,
-  });
-  const segments = buildSegments(items, wager);
-  if (!segments.length) return NextResponse.json({ error: 'no segments' }, { status: 400 });
-
-  const resultIndex = pickIndexWeighted(segments);
-  const now = new Date();
-  const durationMs = 10000;
-
-  // deduct + set state (NO credit yet)
-  await prisma.$transaction([
-    prisma.wallet.update({ where: { userId: me.sub }, data: { balance: bal - wager } }),
-    prisma.spinState.upsert({
-      where: { id: STATE_ID },
-      create: {
-        id: STATE_ID,
-        status: 'SPINNING',
-        userId: me.sub,
-        username: display,
-        wager,
-        segments,
-        resultIndex,
-        spinStartAt: now,
-        durationMs,
-      },
-      update: {
-        status: 'SPINNING',
-        userId: me.sub,
-        username: display,
-        wager,
-        segments,
-        resultIndex,
-        spinStartAt: now,
-        durationMs,
-      },
-    }),
+  // Load all tiers we may use to build the wheel
+  const [items50, items100, items200, items500] = await Promise.all([
+    prisma.item.findMany({ where:{ isActive:true, tier:'T50'  }, select:{ name:true, imageUrl:true }}),
+    prisma.item.findMany({ where:{ isActive:true, tier:'T100' }, select:{ name:true, imageUrl:true }}),
+    prisma.item.findMany({ where:{ isActive:true, tier:'T200' }, select:{ name:true, imageUrl:true }}),
+    prisma.item.findMany({ where:{ isActive:true, tier:'T500' }, select:{ name:true, imageUrl:true }}),
   ]);
 
-  const newBal = (await prisma.wallet.findUnique({ where: { userId: me.sub } }))?.balance || 0;
+  const segments = buildSegments({ items50, items100, items200, items500 }, W);
 
-  return NextResponse.json(
-    {
-      status: 'SPINNING',
-      userId: me.sub,
-      username: display,
-      wager,
-      segments,
-      resultIndex,
-      spinStartAt: now.toISOString(),
-      durationMs,
-      balance: newBal,
+  // Deduct wager now
+  await prisma.wallet.update({
+    where: { userId: me.id },
+    data:  { balance: { decrement: W } },
+  });
+
+  // Pick winner
+  const resultIndex = pickIndexWeighted(segments);
+  const seg = segments[resultIndex];
+
+  // Apply reward & log
+  let prizeText = '';
+  let balanceAfter = balance - W;
+
+  if (seg.type === 'coins') {
+    balanceAfter += seg.amount;
+    await prisma.wallet.update({
+      where: { userId: me.id },
+      data:  { balance: { increment: seg.amount } },
+    });
+    prizeText = `+${seg.amount} coins`;
+  } else if (seg.type === 'again') {
+    prizeText = 'Another spin';
+  } else if (seg.type === 'item') {
+    prizeText = seg.name;
+  }
+
+  await prisma.spinLog.create({
+    data: {
+      userId: me.id,
+      username: me.displayName || me.username || 'user',
+      wager: W,
+      prize: prizeText,
     },
-    { headers: { 'Cache-Control': 'no-store' } }
-  );
+  });
+
+  // Respond with the full spin so all clients animate the same
+  const spin = {
+    status: 'SPINNING',
+    userId: me.id,
+    username: me.displayName || me.username || 'user',
+    wager: W,
+    segments,
+    resultIndex,
+    spinStartAt: new Date().toISOString(),
+    durationMs: 10000,
+    balance: balanceAfter,
+  };
+
+  // If you maintain a shared spin state table, update it here:
+  try {
+    await prisma.spinState.upsert({
+      where: { id: 'global' },
+      update: {
+        status: 'SPINNING',
+        userId: spin.userId,
+        username: spin.username,
+        wager: spin.wager,
+        segments: spin.segments,
+        resultIndex: spin.resultIndex,
+        spinStartAt: new Date(spin.spinStartAt),
+        durationMs: spin.durationMs,
+      },
+      create: {
+        id: 'global',
+        status: 'SPINNING',
+        userId: spin.userId,
+        username: spin.username,
+        wager: spin.wager,
+        segments: spin.segments,
+        resultIndex: spin.resultIndex,
+        spinStartAt: new Date(spin.spinStartAt),
+        durationMs: spin.durationMs,
+      },
+    });
+  } catch {}
+
+  return NextResponse.json(spin, { headers: { 'Cache-Control': 'no-store' } });
 }
