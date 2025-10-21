@@ -3,16 +3,15 @@ export const revalidate = 0;
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
-// import { requireAdmin } from '@/app/lib/auth';
+import { requireAdmin } from '@/app/lib/auth';
 
 export async function POST(req) {
-  // try { requireAdmin(); } catch { return NextResponse.json({ error: 'forbidden' }, { status: 403 }); }
+  try { requireAdmin(); } catch { return NextResponse.json({ error: 'forbidden' }, { status: 403 }); }
 
   const { userId, featured } = await req.json().catch(() => ({}));
   if (!userId || typeof featured !== 'boolean') {
     return NextResponse.json({ error: 'bad request' }, { status: 400 });
   }
-
   await prisma.user.update({ where: { id: userId }, data: { featured } });
   return NextResponse.json({ ok: true });
 }
