@@ -8,42 +8,32 @@ import { requireUser } from '@/app/lib/auth';
 const STATE_ID = 'global';
 
 export async function POST() {
+  // auth
   let me;
-  try {
-    me = requireUser();
-  } catch {
-    return NextResponse.json({ error: 'unauth' }, { status: 401 });
-  }
+  try { me = requireUser(); } catch { return NextResponse.json({ error: 'unauth' }, { status: 401 }); }
 
-  // Read current spin state
+  // read state
   const s = await prisma.spinState.findUnique({ where: { id: STATE_ID } });
-  if (!s || s.status !== 'SPINNING') {
-    return NextResponse.json({ error: 'no-spin' }, { status: 400 });
-  }
+  if (!s || s.status !== 'SPINNING') return NextResponse.json({ error: 'no-spin' }, { status: 400 });
 
-  // Only the spinner can complete (unless spin expired)
-  const startedAtMs = s.spinStartAt ? new Date(s.spinStartAt).getTime() : 0;
+  // allow only spinner (unless expired)
+  const started = s.spinStartAt ? new Date(s.spinStartAt).getTime() : 0;
   const dur = Number(s.durationMs || 0);
-  const expired = startedAtMs && dur ? Date.now() > startedAtMs + dur + 500 : false;
+  const expired = started && dur ? Date.now() > started + dur + 500 : false;
   if (s.userId && s.userId !== me.sub && !expired) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
 
-  // Determine the reward:
-  // Prefer pendingReward (if you added it to the schema), else derive from segments/resultIndex
+  // determine reward from stored segments/resultIndex
   let reward = null;
-  if (s.pendingReward) {
-    reward = s.pendingReward;
-  } else if (Array.isArray(s.segments) && typeof s.resultIndex === 'number') {
+  if (Array.isArray(s.segments) && typeof s.resultIndex === 'number') {
     reward = s.segments[s.resultIndex] || null;
   }
 
-  const user =
-    s.userId ? await prisma.user.findUnique({ where: { id: s.userId } }) : null;
-  const display =
-    (user && (user.displayName || user.username)) || s.username || 'Player';
+  const user = s.userId ? await prisma.user.findUnique({ where: { id: s.userId } }) : null;
+  const display = (user && (user.displayName || user.username)) || s.username || 'Player';
 
-  // Apply the reward + log win
+  // apply reward + log
   if (reward && reward.type === 'coins') {
     await prisma.wallet.update({
       where: { userId: s.userId || me.sub },
@@ -67,9 +57,9 @@ export async function POST() {
       },
     });
   }
-  // 'again' or no reward → no credit/log
+  // 'again' → no credit/log
 
-  // Clear global state
+  // clear state
   await prisma.spinState.update({
     where: { id: STATE_ID },
     data: {
@@ -81,30 +71,17 @@ export async function POST() {
       resultIndex: null,
       spinStartAt: null,
       durationMs: null,
-      pendingReward: null, // safe even if the field doesn’t exist (Prisma ignores)
     },
   });
 
-  const newBal =
-    (await prisma.wallet.findUnique({
-      where: { userId: s.userId || me.sub },
-    }))?.balance || 0;
+  const newBal = (await prisma.wallet.findUnique({ where: { userId: (s.userId || me.sub) } }))?.balance || 0;
 
-  // Build popup for the client
   let popup = null;
   if (reward?.type === 'coins') {
-    popup = {
-      text: `'${display}' siz +${Number(reward.amount || 0)} tangalarni yutib oldingiz🎉`,
-    };
+    popup = { text: `'${display}' siz +${Number(reward.amount || 0)} tangalarni yutib oldingiz🎉` };
   } else if (reward?.type === 'item') {
-    popup = {
-      text: `'${display}' siz '${reward.name}' yutib oldingiz🎉`,
-      imageUrl: reward.imageUrl || null,
-    };
+    popup = { text: `'${display}' siz '${reward.name}' yutib oldingiz🎉`, imageUrl: reward.imageUrl || null };
   }
 
-  return NextResponse.json(
-    { ok: true, balance: newBal, popup },
-    { headers: { 'Cache-Control': 'no-store' } }
-  );
+  return NextResponse.json({ ok: true, balance: newBal, popup }, { headers: { 'Cache-Control': 'no-store' } });
 }
