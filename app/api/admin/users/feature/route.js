@@ -12,6 +12,18 @@ export async function POST(req) {
   if (!userId || typeof featured !== 'boolean') {
     return NextResponse.json({ error: 'bad request' }, { status: 400 });
   }
-  await prisma.user.update({ where: { id: userId }, data: { featured } });
-  return NextResponse.json({ ok: true });
+
+  const u = await prisma.user.update({
+    where: { id: userId },
+    data: { featured },
+    include: { wallet: true },
+  });
+
+  return NextResponse.json({
+    id: u.id,
+    username: u.username,
+    displayName: u.displayName || u.username,
+    featured: !!u.featured,
+    balance: u.wallet?.balance ?? 0,
+  });
 }
