@@ -17,8 +17,9 @@ export async function GET() {
   const out = users.map(u => ({
     id: u.id,
     username: u.username,
-    displayName: u.displayName || u.username,  // show pretty name
+    displayName: u.displayName || u.username,
     role: u.role,
+    featured: !!u.featured,             // ← make sure we send it
     balance: u.wallet?.balance ?? 0,
     createdAt: u.createdAt,
   }));
