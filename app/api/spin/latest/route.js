@@ -8,10 +8,7 @@ export async function GET() {
   const rows = await prisma.spinLog.findMany({
     orderBy: { createdAt: 'desc' },
     take: 5,
-    include: {  // pull nice name from User
-      // @ts-ignore - prisma relation via userId
-      user: { select: { displayName: true, username: true } }
-    }
+    include: { user: { select: { displayName: true, username: true } } }
   });
 
   const out = rows.map(r => ({
