@@ -5,19 +5,17 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 
 export async function GET() {
-  const users = await prisma.user.findMany({
+  const list = await prisma.user.findMany({
     where: { featured: true },
-    include: { wallet: true },
-    orderBy: { createdAt: 'desc' },
-    take: 200
+    orderBy: { displayName: 'asc' },
+    select: { id:true, displayName:true, username:true, balance:true }
   });
 
-  const out = users.map(u => ({
+  const out = list.map(u => ({
     id: u.id,
-    displayName: u.displayName || u.username,
-    username: u.username,
-    balance: u.wallet?.balance ?? 0
+    displayName: u.displayName || u.username || 'User',
+    balance: Number(u.balance || 0),
   }));
 
-  return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store' } });
+  return NextResponse.json(out, { headers:{ 'Cache-Control':'no-store' }});
 }
