@@ -5,45 +5,51 @@ export default function AdminUsersPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
-  const [editing, setEditing] = useState(null); // userId
+  const [editing, setEditing] = useState(null);
   const [editName, setEditName] = useState('');
-  const [pwdFor, setPwdFor] = useState(null);   // user object for modal
+  const [pwdFor, setPwdFor] = useState(null);
   const [pwd1, setPwd1] = useState('');
   const [pwd2, setPwd2] = useState('');
   const [pwdBusy, setPwdBusy] = useState(false);
 
-  const load = async () => {
+  async function load() {
     setLoading(true); setErr('');
     try {
       const r = await fetch('/api/admin/users', { cache: 'no-store' });
-      if (!r.ok) throw new Error('list failed');
       const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'list failed');
       setRows(j);
     } catch (e) {
-      setErr('Failed to load users');
+      setErr('Failed to load users (are you logged in as admin?)');
     } finally {
       setLoading(false);
     }
-  };
+  }
   useEffect(() => { load(); }, []);
 
-  const toggleFeatured = async (userId, featured) => {
+  async function toggleFeatured(userId, featured) {
+    // optimistic update
+    setRows(rs => rs.map(x => x.id === userId ? { ...x, featured } : x));
     try {
       const r = await fetch('/api/admin/users/feature', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, featured })
       });
-      if (!r.ok) throw new Error();
-      await load();
-    } catch {
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'toggle failed');
+      // replace with authoritative server value
+      setRows(rs => rs.map(x => x.id === userId ? { ...x, ...j } : x));
+    } catch (e) {
       alert('Failed to update “Show on main page”.');
+      // revert if failed
+      setRows(rs => rs.map(x => x.id === userId ? { ...x, featured: !featured } : x));
     }
-  };
+  }
 
   const startRename = (u) => { setEditing(u.id); setEditName(u.displayName || u.username || ''); };
   const cancelRename = () => { setEditing(null); setEditName(''); };
-  const saveRename = async (userId) => {
+  async function saveRename(userId) {
     const displayName = (editName || '').trim();
     if (!displayName) return alert('Name cannot be empty');
     try {
@@ -52,15 +58,18 @@ export default function AdminUsersPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, displayName })
       });
-      if (!r.ok) throw new Error();
-      setEditing(null); setEditName(''); await load();
-    } catch { alert('Rename failed'); }
-  };
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'rename failed');
+      setEditing(null); setEditName('');
+      await load();
+    } catch {
+      alert('Rename failed.');
+    }
+  }
 
   const openSetPwd = (u) => { setPwdFor(u); setPwd1(''); setPwd2(''); setPwdBusy(false); };
   const closeSetPwd = () => { setPwdFor(null); setPwd1(''); setPwd2(''); };
-
-  const submitSetPwd = async () => {
+  async function submitSetPwd() {
     if (!pwd1 || pwd1.length < 6) return alert('Password must be at least 6 characters');
     if (pwd1 !== pwd2) return alert('Passwords do not match');
     setPwdBusy(true);
@@ -74,16 +83,15 @@ export default function AdminUsersPage() {
       if (!r.ok) throw new Error(j.error || 'set failed');
       alert('Password updated.');
       closeSetPwd();
-    } catch (e) {
+    } catch {
       alert('Failed to set password.');
       setPwdBusy(false);
     }
-  };
+  }
 
   return (
     <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif' }}>
       <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 16 }}>Admin: Users</h1>
-
       {err && <div style={{ color: 'crimson', marginBottom: 12 }}>{err}</div>}
 
       {loading ? (
@@ -105,14 +113,10 @@ export default function AdminUsersPage() {
                 <td style={td}>
                   {editing === u.id ? (
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <input
-                        value={editName}
-                        onChange={e => setEditName(e.target.value)}
-                        style={{ padding: 6, border: '1px solid #ccc', borderRadius: 6, minWidth: 220 }}
-                        placeholder="Display name"
-                      />
+                      <input value={editName} onChange={e => setEditName(e.target.value)}
+                             style={{ padding: 6, border: '1px solid #ccc', borderRadius: 6, minWidth: 220 }} />
                       <button className="btn" onClick={() => saveRename(u.id)}>Save</button>
-                      <button className="btn" onClick={cancelRename} style={{ background: '#eee', color: '#111' }}>Cancel</button>
+                      <button className="btn" onClick={cancelRename} style={{ background:'#eee', color:'#111' }}>Cancel</button>
                     </div>
                   ) : (
                     <span>{u.displayName}</span>
@@ -121,14 +125,18 @@ export default function AdminUsersPage() {
                 <td style={td}><code>{u.username}</code></td>
                 <td style={td}>{u.balance}</td>
                 <td style={td}>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                    <input type="checkbox" checked={!!u.featured} onChange={e => toggleFeatured(u.id, e.target.checked)} />
+                  <label style={{ display:'inline-flex', alignItems:'center', gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={!!u.featured}
+                      onChange={e => toggleFeatured(u.id, e.target.checked)}
+                    />
                     Featured
                   </label>
                 </td>
                 <td style={td}>
                   {editing === u.id ? null : (
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div style={{ display:'flex', gap:8 }}>
                       <button className="btn" onClick={() => startRename(u)}>Rename</button>
                       <button className="btn danger" onClick={() => openSetPwd(u)}>Set password</button>
                     </div>
@@ -142,35 +150,22 @@ export default function AdminUsersPage() {
       )}
 
       <style>{`
-        .btn { padding: 8px 12px; border-radius: 8px; border: 1px solid #ddd; background: #111; color: #fff; cursor: pointer; }
-        .btn:hover { opacity: .9; }
-        .btn.danger { background: #7f1d1d; border-color: #6b1515; }
+        .btn { padding:8px 12px; border-radius:8px; border:1px solid #ddd; background:#111; color:#fff; cursor:pointer; }
+        .btn:hover { opacity:.9; }
+        .btn.danger { background:#7f1d1d; border-color:#6b1515; }
       `}</style>
 
-      {/* Set password modal */}
       {pwdFor && (
         <div style={overlay} onClick={closeSetPwd}>
           <div style={modal} onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0, marginBottom: 10 }}>Set password</h3>
-            <div style={{ marginBottom: 10 }}>
+            <h3 style={{ marginTop: 0 }}>Set password</h3>
+            <div style={{ marginBottom: 8 }}>
               <b>User:</b> {pwdFor.displayName} <small style={{ opacity:.7 }}>({pwdFor.username})</small>
             </div>
-            <div style={{ display: 'grid', gap: 8 }}>
-              <input
-                type="password"
-                placeholder="New password (min 6 chars)"
-                value={pwd1}
-                onChange={e => setPwd1(e.target.value)}
-                style={inp}
-              />
-              <input
-                type="password"
-                placeholder="Confirm password"
-                value={pwd2}
-                onChange={e => setPwd2(e.target.value)}
-                style={inp}
-              />
-              <div style={{ display:'flex', gap:8, marginTop: 4 }}>
+            <div style={{ display:'grid', gap:8 }}>
+              <input type="password" placeholder="New password (min 6 chars)" value={pwd1} onChange={e => setPwd1(e.target.value)} style={inp}/>
+              <input type="password" placeholder="Confirm password" value={pwd2} onChange={e => setPwd2(e.target.value)} style={inp}/>
+              <div style={{ display:'flex', gap:8 }}>
                 <button className="btn" disabled={pwdBusy} onClick={submitSetPwd}>Save</button>
                 <button className="btn" onClick={closeSetPwd} style={{ background:'#eee', color:'#111' }}>Cancel</button>
               </div>
