@@ -3,7 +3,7 @@ export const revalidate = 0;
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
-// import { requireAdmin } from '@/app/lib/auth'; // add if you want to lock it
+// import { requireAdmin } from '@/app/lib/auth';
 
 export async function GET() {
   // try { requireAdmin(); } catch { return NextResponse.json({ error: 'forbidden' }, { status: 403 }); }
@@ -22,6 +22,7 @@ export async function GET() {
 
   const out = users.map(u => ({
     id: u.id,
+    username: u.username,
     displayName: u.displayName || u.username || 'User',
     balance: balById.get(u.id) ?? 0,
     featured: !!u.featured
