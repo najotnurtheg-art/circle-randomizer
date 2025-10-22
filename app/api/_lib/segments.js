@@ -1,97 +1,99 @@
 // app/api/_lib/segments.js
-import { prisma } from '@/app/lib/prisma';
 
-const TIER = {
-  50: 'T50',
-  100: 'T100',
-  200: 'T200',
-  500: 'T500',
+// Weight map as requested:
+// normal = 10, 2x harder = 5, 3x harder = 3, 5x harder = 2
+export const WEIGHTS = {
+  NORMAL: 10,
+  HARDER_2X: 5,
+  HARDER_3X: 3,
+  HARDER_5X: 2,
 };
 
-function pickN(arr, n) {
-  if (!arr.length) return [];
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    out.push(arr[Math.floor(Math.random() * arr.length)]);
-  }
-  return out;
+function pickTwoRandom(arr) {
+  if (arr.length <= 2) return arr.slice(0, 2);
+  const i = Math.floor(Math.random() * arr.length);
+  let j = Math.floor(Math.random() * (arr.length - 1));
+  if (j >= i) j++;
+  return [arr[i], arr[j]];
 }
 
-export async function buildSegmentsForWager(wager) {
-  const [t50, t100, t200, t500] = await Promise.all([
-    prisma.item.findMany({ where: { tier: 'T50',  isActive: true }, orderBy:{createdAt:'asc'} }),
-    prisma.item.findMany({ where: { tier: 'T100', isActive: true }, orderBy:{createdAt:'asc'} }),
-    prisma.item.findMany({ where: { tier: 'T200', isActive: true }, orderBy:{createdAt:'asc'} }),
-    prisma.item.findMany({ where: { tier: 'T500', isActive: true }, orderBy:{createdAt:'asc'} }),
-  ]);
+// return flat array of segments and a single resultIndex chosen by weights
+export function buildWheelFromItemsByTier({ t50, t100, t200, t500 }, wager) {
+  const segs = [];
+  const weights = [];
 
-  const segments = [];
-
-  const pushItem = (item, weight) => {
-    segments.push({
-      type: 'item',
-      id: item.id,
-      name: item.name,
-      imageUrl: item.imageUrl || null,
-      tier: item.tier,
-      weight
-    });
+  const pushItem = (it, w) => {
+    segs.push({ type: 'item', id: it.id, name: it.name, imageUrl: it.imageUrl || null });
+    weights.push(w);
   };
-  const pushCoins = (amount, weight) => {
-    segments.push({ type:'coins', amount, weight });
+  const pushCoins = (amount, w) => {
+    segs.push({ type: 'coins', amount });
+    weights.push(w);
   };
-  const pushRespin = (weight) => {
-    segments.push({ type:'respin', weight });
+  const pushRespin = (w) => {
+    segs.push({ type: 'respin' });
+    weights.push(w);
   };
-
-  // weights
-  const W = { normal:10, x2:5, x3:3, x5:2 };
 
   if (wager === 50) {
-    t50.forEach(it => pushItem(it, W.normal));
-    pickN(t100, 2).forEach(it => pushItem(it, W.x3)); // 3x harder
-    pushCoins(75, W.x2);  // 2x harder
-    pushRespin(W.normal);
+    // all items that cost 50 coin - normal
+    t50.forEach(it => pushItem(it, WEIGHTS.NORMAL));
+
+    // 2 items that cost 100 coin - 3x harder
+    pickTwoRandom(t100).forEach(it => pushItem(it, WEIGHTS.HARDER_3X));
+
+    // +75 coins - 2x harder
+    pushCoins(75, WEIGHTS.HARDER_2X);
+
+    // another spin - normal
+    pushRespin(WEIGHTS.NORMAL);
+
   } else if (wager === 100) {
-    t100.forEach(it => pushItem(it, W.normal));
-    pickN(t200, 2).forEach(it => pushItem(it, W.x3)); // 3x harder
-    pickN(t50,  2).forEach(it => pushItem(it, W.x3)); // 3x harder
-    pushCoins(150, W.x2); // 2x harder
-    pushRespin(W.normal);
+    // all items that cost 100 coin - normal
+    t100.forEach(it => pushItem(it, WEIGHTS.NORMAL));
+
+    // 2 items that cost 200 coin - 3x harder
+    pickTwoRandom(t200).forEach(it => pushItem(it, WEIGHTS.HARDER_3X));
+
+    // 2 items that cost 50 coin - 3x harder
+    pickTwoRandom(t50).forEach(it => pushItem(it, WEIGHTS.HARDER_3X));
+
+    // +150 coins - 2x harder
+    pushCoins(150, WEIGHTS.HARDER_2X);
+
+    // another spin - normal
+    pushRespin(WEIGHTS.NORMAL);
+
   } else if (wager === 200) {
-    t200.forEach(it => pushItem(it, W.normal));
-    pickN(t500, 2).forEach(it => pushItem(it, W.x5)); // 5x harder
-    pickN(t100, 2).forEach(it => pushItem(it, W.x2)); // 2x harder
-    pushCoins(300, W.x3); // 3x harder
-    pushRespin(W.normal);
+    // all items that cost 200 coin - normal
+    t200.forEach(it => pushItem(it, WEIGHTS.NORMAL));
+
+    // 2 items that cost 500 coin - 5x harder
+    pickTwoRandom(t500).forEach(it => pushItem(it, WEIGHTS.HARDER_5X));
+
+    // 2 items that cost 100 coin - 2x harder
+    pickTwoRandom(t100).forEach(it => pushItem(it, WEIGHTS.HARDER_2X));
+
+    // +300 coins - 3x harder
+    pushCoins(300, WEIGHTS.HARDER_3X);
+
+    // another spin - normal
+    pushRespin(WEIGHTS.NORMAL);
+
   } else {
-    // default to 50 if something odd is sent
-    t50.forEach(it => pushItem(it, W.normal));
-    pushRespin(W.normal);
+    // fallback to 50-spin behavior
+    return buildWheelFromItemsByTier({ t50, t100, t200, t500 }, 50);
   }
 
-  // make a deterministic label array for drawing the wheel
-  const drawSegments = segments.map(s => {
-    if (s.type === 'item') return { type:'item', name:s.name, imageUrl:s.imageUrl };
-    if (s.type === 'coins') return { type:'coins', amount:s.amount };
-    return { type:'respin' };
-  });
-
-  return { weighted: segments, drawSegments };
-}
-
-export function chooseWeightedIndex(weighted) {
-  const total = weighted.reduce((a,s)=>a + (s.weight||0), 0);
+  // choose a resultIndex by weights
+  const total = weights.reduce((a, b) => a + b, 0);
   let r = Math.random() * total;
-  for (let i=0;i<weighted.length;i++) {
-    r -= weighted[i].weight || 0;
-    if (r <= 0) return i;
+  let resultIndex = 0;
+  for (let i = 0; i < weights.length; i++) {
+    if (r < weights[i]) { resultIndex = i; break; }
+    r -= weights[i];
   }
-  return weighted.length - 1;
-}
 
-export function prizeText(seg) {
-  if (seg.type === 'item')  return seg.name;
-  if (seg.type === 'coins') return `+${seg.amount} coins`;
-  return 'Another spin';
+  const reward = segs[resultIndex];
+  return { segments: segs, resultIndex, reward };
 }
