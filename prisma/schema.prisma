@@ -1,74 +1,43 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-generator client {
-  provider = "prisma-client-js"
-}
-
-enum Role {
-  USER
-  ADMIN
-}
-
-enum PriceTier {
-  T50
-  T100
-  T200
-  T500
-}
-
 model User {
-  id           String   @id @default(cuid())
-  username     String   @unique
-  displayName  String?
-  password     String
-  role         Role     @default(USER)
-  featured     Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  wallet       Wallet?
+  id        String   @id @default(cuid())
+  telegramId String? @unique
+  username  String?
+  wallet    Wallet?
+  spins     Spin[]
 }
 
 model Wallet {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  balance   Int      @default(0)
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id])
+  id       String  @id @default(cuid())
+  userId   String  @unique
+  balance  Int     @default(0)
+  user     User    @relation(fields: [userId], references: [id])
 }
 
 model Item {
-  id           String   @id @default(cuid())
-  name         String
-  tier         PriceTier
-  isActive     Boolean  @default(true)
-  imageUrl     String?
-  purchasable  Boolean  @default(false)   // ← must exist
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id        String   @id @default(cuid())
+  name      String
+  tier      Int
+  active    Boolean  @default(true)
+  imageUrl  String?
+  store     Boolean  @default(false)
+  createdAt DateTime @default(now())
 }
 
-
-model SpinState {
-  id           String   @id @default("global")
-  status       String   @default("IDLE")
-  userId       String?
-  username     String?
-  wager        Int?
-  segments     Json?
-  resultIndex  Int?
-  spinStartAt  DateTime?
-  durationMs   Int?
-  pendingReward Json?   // ← add this line
-  updatedAt    DateTime @updatedAt
-}
-
-model SpinLog {
+model Spin {
   id        String   @id @default(cuid())
   userId    String
-  username  String
-  wager     Int
-  prize     String
+  tier      Int
+  rewardId  String?
+  reward    String?
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
 }
