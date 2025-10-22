@@ -1,11 +1,14 @@
-// app/layout.js
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+export const metadata = {
+  title: 'Circle Randomizer',
+  description: 'Simple test page',
+};
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="uz">
-      <body style={{ margin: 0 }}>{children}</body>
+    <html lang="en">
+      <body style={{ margin: 0, fontFamily: 'system-ui, sans-serif' }}>
+        {children}
+      </body>
     </html>
   );
 }
