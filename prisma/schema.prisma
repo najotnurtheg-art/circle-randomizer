@@ -51,16 +51,17 @@ model Item {
 
 
 model SpinState {
-  id          String   @id @default("global")
-  status      String   @default("IDLE")
-  userId      String?
-  username    String?
-  wager       Int?
-  segments    Json?
-  resultIndex Int?
-  spinStartAt DateTime?
-  durationMs  Int?
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default("global")
+  status       String   @default("IDLE")
+  userId       String?
+  username     String?
+  wager        Int?
+  segments     Json?
+  resultIndex  Int?
+  spinStartAt  DateTime?
+  durationMs   Int?
+  pendingReward Json?   // ← add this line
+  updatedAt    DateTime @updatedAt
 }
 
 model SpinLog {
