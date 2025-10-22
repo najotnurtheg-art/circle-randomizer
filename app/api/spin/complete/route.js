@@ -1,96 +1,37 @@
-// app/api/spin/complete/route.js
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+import { NextResponse } from "next/server";
+import prisma from "@/app/lib/prisma";
 
-import { NextResponse } from 'next/server';
-import { prisma } from '@/app/lib/prisma';
-import { getUser } from '@/app/lib/auth';
-
-export async function POST() {
+export async function POST(req) {
   try {
-    const me = await getUser();
+    const { userId, rewardId } = await req.json();
 
-    const s = await prisma.spinState.findUnique({ where: { id: 'global' } });
-    if (!s || s.status !== 'SPINNING' || !s.spinStartAt) {
-      return NextResponse.json({ ok: true, message: 'no_active_spin' });
+    if (!userId || !rewardId) {
+      return NextResponse.json({ error: "Missing data" }, { status: 400 });
     }
 
-    const done =
-      Date.now() >= new Date(s.spinStartAt).getTime() + Number(s.durationMs || 0);
-
-    if (s.userId && s.userId !== me.sub && !done) {
-      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    const reward = await prisma.item.findUnique({ where: { id: rewardId } });
+    if (!reward) {
+      return NextResponse.json({ error: "Reward not found" }, { status: 404 });
     }
 
-    const reward = s.pendingReward || null;
-    const targetUserId = s.userId || me.sub;
-    const username = s.username || 'User';
-    const wager = Number(s.wager || 0);
-
-    await prisma.$transaction(async (tx) => {
-      // Ensure wallet
-      const w = await tx.wallet.upsert({
-        where: { userId: targetUserId },
-        update: {},
-        create: { userId: targetUserId, balance: 0 },
+    if (reward.type === "coins") {
+      await prisma.wallet.update({
+        where: { userId },
+        data: { balance: { increment: reward.value || 0 } },
       });
+    }
 
-      // Debit spin cost
-      await tx.wallet.update({
-        where: { id: w.id },
-        data: { balance: { decrement: wager } },
-      });
-
-      // Apply reward + log
-      if (reward && reward.type === 'coins') {
-        await tx.wallet.update({
-          where: { id: w.id },
-          data: { balance: { increment: Number(reward.amount || 0) } },
-        });
-        await tx.spinLog.create({
-          data: { userId: targetUserId, username, wager, prize: `+${reward.amount} coins` },
-        });
-      } else if (reward && reward.type === 'item') {
-        await tx.spinLog.create({
-          data: { userId: targetUserId, username, wager, prize: reward.name || 'Prize' },
-        });
-      } else {
-        await tx.spinLog.create({
-          data: { userId: targetUserId, username, wager, prize: 'Another spin' },
-        });
-      }
-
-      // Reset state
-      await tx.spinState.update({
-        where: { id: 'global' },
-        data: {
-          status: 'IDLE',
-          userId: null,
-          username: null,
-          wager: null,
-          segments: [],
-          resultIndex: null,
-          spinStartAt: null,
-          durationMs: null,
-          pendingReward: null,
-        },
-      });
+    await prisma.spinHistory.create({
+      data: {
+        userId,
+        rewardId,
+        timestamp: new Date(),
+      },
     });
 
-    // popup for UI
-    let popup = null;
-    if (reward?.type === 'coins') {
-      popup = { text: `'${username}' siz +${reward.amount} tangalarni yutib oldingiz🎉`, imageUrl: null };
-    } else if (reward?.type === 'item') {
-      popup = { text: `'${username}' siz '${reward.name}' yutib oldingiz🎉`, imageUrl: reward.imageUrl || null };
-    } else {
-      popup = { text: `'${username}' uchun yana bir aylantirish!`, imageUrl: null };
-    }
-
-    return NextResponse.json({ ok: true, popup });
-
-  } catch (e) {
-    console.error('spin complete error', e);
-    return NextResponse.json({ error: 'server' }, { status: 500 });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Spin complete error:", error);
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
