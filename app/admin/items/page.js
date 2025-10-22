@@ -162,7 +162,7 @@ export default function AdminItemsPage() {
               <th style={th}>Tier</th>
               <th style={th}>Active</th>
               <th style={th}>Store</th>
-              <th style={th}}>Actions</th>
+              <th style={th}>Actions</th>
             </tr>
           </thead>
           <tbody>
