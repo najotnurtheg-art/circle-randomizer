@@ -1,228 +1,272 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 import { useEffect, useRef, useState } from 'react';
 
-const TIERS = [50, 100, 200, 500];
+// --- Small helpers -----------------------------------------------------------
+function safeJson(res) {
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) return Promise.resolve(null);
+  return res.json().catch(() => null);
+}
+const prettyTier = (t) => (t === 'T50' ? 50 : t === 'T100' ? 100 : t === 'T200' ? 200 : 500);
 
+// -----------------------------------------------------------------------------
 export default function AdminItemsPage() {
-  const [ready, setReady] = useState(false);
   const [items, setItems] = useState([]);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // add form
-  const [name, setName] = useState('');
-  const [tier, setTier] = useState(50);
-  const [imageUrl, setImageUrl] = useState('');
-  const addFileRef = useRef(null);
+  const nameRef = useRef(null);
+  const tierRef = useRef(null);
+  const urlRef = useRef(null);
+  const fileRef = useRef(null);
+  const searchRef = useRef(null);
 
-  const [q, setQ] = useState('');
+  const [filter, setFilter] = useState('');
 
-  useEffect(() => setReady(true), []);
-
-  const safeJson = async (r) => {
-    try { return await r.json(); } catch { return {}; }
-  };
-
+  // --- load items safely ------------------------------------------------------
   const load = async () => {
-    setLoading(true);
     setErr('');
+    setLoading(true);
     try {
-      const r = await fetch('/api/admin/items', { cache: 'no-store' });
-      const j = await safeJson(r);
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      const res = await fetch('/api/admin/items', { cache: 'no-store' });
+      if (!res.ok) {
+        const j = await safeJson(res);
+        throw new Error(j?.error || `HTTP ${res.status}`);
+      }
+      const j = await res.json();
       setItems(Array.isArray(j) ? j : []);
     } catch (e) {
-      setErr('Admin bo‘limi uchun login talab qilinadi yoki API xatosi.');
-      console.warn(e);
+      setErr('Failed to load items: ' + (e?.message || 'unknown error'));
+      setItems([]);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { if (ready) load(); }, [ready]); // only after mount
+  useEffect(() => { load(); }, []);
 
-  // dataURL helper
-  const fileToDataUrl = (file) => new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(fr.result);
-    fr.onerror = reject;
-    fr.readAsDataURL(file);
-  });
+  // --- actions ----------------------------------------------------------------
+  const addItem = async () => {
+    setErr('');
+    const name = nameRef.current.value.trim();
+    const tierNum = Number(tierRef.current.value);
+    const imageUrl = urlRef.current.value.trim();
+    if (!name || !tierNum) return;
 
-  // add item
-  const addItem = async (e) => {
-    e.preventDefault();
-    if (!name.trim()) { alert('Item name kiriting'); return; }
+    const body = { name, tier: tierNum, imageUrl: imageUrl || null };
     try {
-      const r = await fetch('/api/admin/items', {
+      const res = await fetch('/api/admin/items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), tier, imageUrl: imageUrl || null }),
+        body: JSON.stringify(body),
       });
-      const j = await safeJson(r);
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      setName(''); setImageUrl('');
-      if (addFileRef.current) addFileRef.current.value = '';
+      if (!res.ok) {
+        const j = await safeJson(res);
+        throw new Error(j?.error || `HTTP ${res.status}`);
+      }
+      nameRef.current.value = '';
+      urlRef.current.value = '';
       await load();
     } catch (e) {
-      alert(`Failed to add item.\n${e.message}`);
+      setErr('Failed to add item. ' + (e?.message || ''));
     }
   };
 
-  // buttons
-  const setTierFor = async (id, t) => {
-    const r = await fetch('/api/admin/items/set-tier', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, tier: t }),
-    });
-    const j = await safeJson(r);
-    if (!r.ok) return alert(j.error || 'Tier update failed');
-    load();
-  };
-
-  const toggleActive = async (id, isActive) => {
-    const r = await fetch('/api/admin/items/set-active', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, isActive }),
-    });
-    const j = await safeJson(r);
-    if (!r.ok) return alert(j.error || 'Active update failed');
-    load();
-  };
-
-  const toggleStore = async (id, purchasable) => {
-    const r = await fetch('/api/admin/items/set-store', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, purchasable }),
-    });
-    const j = await safeJson(r);
-    if (!r.ok) return alert(j.error || 'Store update failed');
-    load();
-  };
-
-  const setImageFor = async (id, url) => {
-    const r = await fetch('/api/admin/items/set-image-url', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, imageUrl: url || null }),
-    });
-    const j = await safeJson(r);
-    if (!r.ok) return alert(j.error || 'Image update failed');
-    load();
-  };
-
-  const uploadFor = async (id, f) => {
-    if (!f) return;
-    if (f.size > 1.9 * 1024 * 1024) { alert('Image < 2MB bo‘lsin'); return; }
+  const setTier = async (id, tierNum) => {
     try {
-      const dataUrl = await fileToDataUrl(f);
-      await setImageFor(id, dataUrl);
-    } catch {
-      alert('Faylni o‘qib bo‘lmadi');
+      const res = await fetch('/api/admin/items/setTier', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, tier: tierNum }),
+      });
+      if (!res.ok) {
+        const j = await safeJson(res);
+        throw new Error(j?.error || `HTTP ${res.status}`);
+      }
+      await load();
+    } catch (e) {
+      setErr('Failed to change tier: ' + (e?.message || ''));
     }
   };
 
-  const onAddFile = async (e) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    if (f.size > 1.9 * 1024 * 1024) { alert('Image < 2MB bo‘lsin'); e.target.value=''; return; }
-    const dataUrl = await fileToDataUrl(f);
-    setImageUrl(dataUrl);
+  const toggleActive = async (id, active) => {
+    try {
+      const res = await fetch('/api/admin/items/activate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, active }),
+      });
+      if (!res.ok) {
+        const j = await safeJson(res);
+        throw new Error(j?.error || `HTTP ${res.status}`);
+      }
+      await load();
+    } catch (e) {
+      setErr('Failed to toggle active: ' + (e?.message || ''));
+    }
   };
 
-  if (!ready) return null;
+  const toggleStore = async (id, show) => {
+    try {
+      const res = await fetch('/api/admin/items/toggleStore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, purchasable: show }),
+      });
+      if (!res.ok) {
+        const j = await safeJson(res);
+        throw new Error(j?.error || `HTTP ${res.status}`);
+      }
+      await load();
+    } catch (e) {
+      setErr('Failed to toggle store flag: ' + (e?.message || ''));
+    }
+  };
 
-  const filtered = items.filter(i => (i.name||'').toLowerCase().includes(q.toLowerCase()));
+  const setImageUrl = async (id) => {
+    const v = prompt('Paste image URL for this item:');
+    if (v == null) return;
+    try {
+      const res = await fetch('/api/admin/items/setImageUrl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, imageUrl: v.trim() || null }),
+      });
+      if (!res.ok) {
+        const j = await safeJson(res);
+        throw new Error(j?.error || `HTTP ${res.status}`);
+      }
+      await load();
+    } catch (e) {
+      setErr('Failed to set image: ' + (e?.message || ''));
+    }
+  };
+
+  const uploadImage = async (id) => {
+    const f = fileRef.current?.files?.[0];
+    if (!f) { alert('Choose a file first'); return; }
+    const fd = new FormData();
+    fd.append('file', f);
+    fd.append('id', id);
+    try {
+      const res = await fetch('/api/admin/items/uploadImage', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const j = await safeJson(res);
+        throw new Error(j?.error || `HTTP ${res.status}`);
+      }
+      await load();
+    } catch (e) {
+      setErr('Failed to upload image: ' + (e?.message || ''));
+    } finally {
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const filtered = items.filter((i) =>
+    i.name.toLowerCase().includes(filter.toLowerCase())
+  );
+
+  // --- UI ---------------------------------------------------------------------
+  const th = { padding: '10px 12px', textAlign: 'left', borderBottom: '1px solid #eee' };
+  const td = { padding: '10px 12px', borderBottom: '1px solid #eee', verticalAlign: 'middle' };
+  const btn = { padding: '6px 10px', borderRadius: 8, border: '1px solid #333', background: '#000', color: '#fff', cursor: 'pointer' };
 
   return (
-    <div style={{ padding: 16, fontFamily: 'system-ui, sans-serif' }}>
-      <h1 style={{ margin: '0 0 12px 0' }}>Admin: Items</h1>
+    <div style={{ padding: 20, fontFamily: 'system-ui, sans-serif' }}>
+      <h1>Admin: Items</h1>
 
-      <form onSubmit={addItem} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
-        <input value={name} onChange={e=>setName(e.target.value)} placeholder="item name" style={inp}/>
-        <select value={tier} onChange={e=>setTier(Number(e.target.value))} style={inp}>
-          {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
+      {/* Add row */}
+      <div style={{ display:'flex', gap:8, alignItems:'center', margin:'10px 0 16px' }}>
+        <input ref={nameRef} placeholder="item name" style={{ padding:8, width:260 }} />
+        <select ref={tierRef} defaultValue={50} style={{ padding:8 }}>
+          <option value={50}>50</option>
+          <option value={100}>100</option>
+          <option value={200}>200</option>
+          <option value={500}>500</option>
         </select>
-        <input value={imageUrl} onChange={e=>setImageUrl(e.target.value)} placeholder="or paste image URL (optional)" style={{...inp, minWidth:300}}/>
-        <input ref={addFileRef} type="file" accept="image/*" onChange={onAddFile}/>
-        <button className="btn">Add</button>
-      </form>
+        <input ref={urlRef} placeholder="or paste image URL (optional)" style={{ padding:8, width:320 }} />
+        <button onClick={addItem} style={btn}>Add</button>
+        <input ref={fileRef} type="file" accept="image/*" />
+        <input
+          ref={searchRef}
+          placeholder="Search…"
+          onChange={(e)=>setFilter(e.target.value)}
+          style={{ padding:8, flex:1, minWidth:180 }}
+        />
+      </div>
 
-      <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search…" style={{...inp, marginBottom:10}} />
-
-      {err && <div style={{ color:'crimson', marginBottom:8 }}>{err}</div>}
-      {loading ? <div>Loading…</div> : (
-        <table style={{ width:'100%', borderCollapse:'collapse' }}>
-          <thead>
-            <tr>
-              <th style={th}>Preview</th>
-              <th style={th}>Name</th>
-              <th style={th}>Tier</th>
-              <th style={th}>Active</th>
-              <th style={th}>Store</th>
-              <th style={th}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(it => (
-              <tr key={it.id}>
-                <td style={td}>
-                  {it.imageUrl
-                    ? <img src={it.imageUrl} alt="" style={{width:40,height:40,objectFit:'cover',borderRadius:6}}/>
-                    : <div style={{width:40,height:40,border:'1px solid #ddd',borderRadius:6}}/>}
-                </td>
-                <td style={td}>{it.name}</td>
-                <td style={td}>{String(it.tier)}</td>
-                <td style={td}>
-                  <label style={{display:'inline-flex',gap:6,alignItems:'center'}}>
-                    <input type="checkbox" checked={!!it.isActive} onChange={e=>toggleActive(it.id, e.target.checked)}/>
-                    Active
-                  </label>
-                </td>
-                <td style={td}>
-                  <label style={{display:'inline-flex',gap:6,alignItems:'center'}}>
-                    <input type="checkbox" checked={!!it.purchasable} onChange={e=>toggleStore(it.id, e.target.checked)}/>
-                    Show in Store
-                  </label>
-                </td>
-                <td style={td}>
-                  <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                    <button className="btn sm" type="button" onClick={()=>setTierFor(it.id,50)}>Set 50</button>
-                    <button className="btn sm" type="button" onClick={()=>setTierFor(it.id,100)}>Set 100</button>
-                    <button className="btn sm" type="button" onClick={()=>setTierFor(it.id,200)}>Set 200</button>
-                    <button className="btn sm" type="button" onClick={()=>setTierFor(it.id,500)}>Set 500</button>
-                    <button className="btn sm" type="button" onClick={()=>{
-                      const url = prompt('Image URL yoki data URL', it.imageUrl || '');
-                      if (url !== null) setImageFor(it.id, url);
-                    }}>Set image URL</button>
-                    <label className="btn sm" style={{cursor:'pointer'}}>
-                      Upload image
-                      <input type="file" accept="image/*" style={{display:'none'}} onChange={async (e)=>{
-                        const f = e.target.files?.[0];
-                        await uploadFor(it.id, f);
-                        e.target.value='';
-                      }}/>
-                    </label>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {filtered.length === 0 && <tr><td style={td} colSpan={6}>(empty)</td></tr>}
-          </tbody>
-        </table>
+      {err && (
+        <div style={{ background:'#ffe8e8', color:'#900', padding:10, borderRadius:8, marginBottom:10 }}>
+          {err}
+        </div>
       )}
 
-      <style>{`
-        .btn { padding:8px 12px; border-radius:8px; border:1px solid #d1d5db; background:#111; color:#fff; }
-        .btn.sm { padding:6px 8px; font-size:12px; }
-        .btn:hover { opacity: .92; }
-      `}</style>
+      {loading ? (
+        <div>Loading…</div>
+      ) : (
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ borderCollapse:'collapse', minWidth:900 }}>
+            <thead>
+              <tr>
+                <th style={th}>Preview</th>
+                <th style={th}>Name</th>
+                <th style={th}>Tier</th>
+                <th style={th}>Active</th>
+                <th style={th}>Store</th>
+                <th style={th}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((it) => (
+                <tr key={it.id}>
+                  <td style={td}>
+                    {it.imageUrl ? (
+                      <img src={it.imageUrl} alt="" style={{ width:44, height:44, objectFit:'cover', borderRadius:6 }} />
+                    ) : (
+                      <div style={{ width:44, height:44, background:'#eee', borderRadius:6 }} />
+                    )}
+                  </td>
+                  <td style={td}>{it.name}</td>
+                  <td style={td}>T{prettyTier(it.tier)}</td>
+                  <td style={td}>
+                    <label style={{ display:'inline-flex', gap:6, alignItems:'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={!!it.isActive}
+                        onChange={(e)=>toggleActive(it.id, e.target.checked)}
+                      />
+                      Active
+                    </label>
+                  </td>
+                  <td style={td}>
+                    <label style={{ display:'inline-flex', gap:6, alignItems:'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={!!it.purchasable}
+                        onChange={(e)=>toggleStore(it.id, e.target.checked)}
+                      />
+                      Show in Store
+                    </label>
+                  </td>
+                  <td style={{ ...td, whiteSpace:'nowrap' }}>
+                    <button onClick={()=>setTier(it.id, 50)} style={{ ...btn, background:'#111' }}>Set 50</button>{' '}
+                    <button onClick={()=>setTier(it.id, 100)} style={{ ...btn, background:'#111' }}>Set 100</button>{' '}
+                    <button onClick={()=>setTier(it.id, 200)} style={{ ...btn, background:'#111' }}>Set 200</button>{' '}
+                    <button onClick={()=>setTier(it.id, 500)} style={{ ...btn, background:'#111' }}>Set 500</button>{' '}
+                    <button onClick={()=>toggleActive(it.id, false)} style={{ ...btn, background:'#6b7280' }}>Deactivate</button>{' '}
+                    <button onClick={()=>setImageUrl(it.id)} style={{ ...btn, background:'#374151' }}>Set image URL</button>{' '}
+                    <button onClick={()=>uploadImage(it.id)} style={{ ...btn, background:'#1f2937' }}>Upload image</button>
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={6} style={{ padding:20, color:'#666' }}>No items match.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
-
-const th = { textAlign:'left', padding:'10px 12px', borderBottom:'1px solid #e5e7eb', background:'#f8fafc' };
-const td = { padding:'10px 12px', borderBottom:'1px solid #f1f5f9', verticalAlign:'middle' };
-const inp = { padding:'8px 10px', border:'1px solid #d1d5db', borderRadius:8 };
