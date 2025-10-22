@@ -1,12 +1,12 @@
-import { NextResponse } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { NextResponse } from 'next/server';
+import prisma from '@/app/lib/prisma';
 
 export async function POST(req) {
   try {
     const { id, active } = await req.json();
 
     if (!id) {
-      return NextResponse.json({ error: "Missing item ID" }, { status: 400 });
+      return NextResponse.json({ error: 'Missing item ID' }, { status: 400 });
     }
 
     const updated = await prisma.item.update({
@@ -15,11 +15,8 @@ export async function POST(req) {
     });
 
     return NextResponse.json(updated);
-  } catch (error) {
-    console.error("Toggle active failed:", error);
-    return NextResponse.json(
-      { error: "Server error while toggling item" },
-      { status: 500 }
-    );
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: 'Failed to toggle item' }, { status: 500 });
   }
 }
