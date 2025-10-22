@@ -1,14 +1,13 @@
 'use client';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+export const revalidate = false;
 
 import { useEffect, useRef, useState } from 'react';
 
 const TIERS = [50, 100, 200, 500];
 
 export default function AdminItemsPage() {
-  // Mount gate to avoid SSR rendering of client-only UI (file inputs, etc.)
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
@@ -17,7 +16,6 @@ export default function AdminItemsPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
 
-  // add form
   const [name, setName] = useState('');
   const [tier, setTier] = useState(200);
   const [imageUrl, setImageUrl] = useState('');
@@ -42,7 +40,6 @@ export default function AdminItemsPage() {
   }
   useEffect(() => { load(); }, []);
 
-  // ---------- helpers ----------
   const toDataUrl = (file) =>
     new Promise((resolve, reject) => {
       const fr = new FileReader();
@@ -145,13 +142,13 @@ export default function AdminItemsPage() {
   async function uploadImageForItem(id, file) {
     if (!file) return;
     if (file.size > 1.8 * 1024 * 1024) {
-      alert('Image is too large. Please choose a file smaller than 2 MB.');
+      alert('Image is too large. Choose a file < 2 MB.');
       return;
     }
     try {
       const dataUrl = await toDataUrl(file);
       await setImageFor(id, dataUrl);
-    } catch (e) {
+    } catch {
       alert('Failed to read file.');
     }
   }
@@ -160,7 +157,7 @@ export default function AdminItemsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 1.8 * 1024 * 1024) {
-      alert('Image is too large. Please choose a file smaller than 2 MB.');
+      alert('Image is too large. Choose a file < 2 MB.');
       e.target.value = '';
       return;
     }
@@ -180,14 +177,8 @@ export default function AdminItemsPage() {
     <div style={{ padding: 20, fontFamily: 'system-ui, sans-serif' }}>
       <h1 style={{ margin: '0 0 12px 0' }}>Admin: Items</h1>
 
-      {/* Add form */}
       <form onSubmit={addItem} style={{ display:'flex', gap:12, alignItems:'center', marginBottom:12 }}>
-        <input
-          value={name}
-          onChange={e => setName(e.target.value)}
-          placeholder="item name"
-          style={inp}
-        />
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="item name" style={inp}/>
         <select value={tier} onChange={e => setTier(Number(e.target.value))} style={sel}>
           {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
@@ -253,14 +244,10 @@ export default function AdminItemsPage() {
                     <button className="btn sm" onClick={() => setActive(it.id, !it.isActive)}>
                       {it.isActive ? 'Deactivate' : 'Activate'}
                     </button>
-                    <button
-                      className="btn sm"
-                      onClick={() => {
-                        const url = prompt('Paste image URL (or data: URL)', it.imageUrl || '');
-                        if (url != null) setImageFor(it.id, url);
-                      }}
-                    >Set image URL</button>
-
+                    <button className="btn sm" onClick={() => {
+                      const url = prompt('Paste image URL (or data: URL)', it.imageUrl || '');
+                      if (url != null) setImageFor(it.id, url);
+                    }}>Set image URL</button>
                     <label className="btn sm" style={{ cursor:'pointer' }}>
                       Upload image
                       <input
