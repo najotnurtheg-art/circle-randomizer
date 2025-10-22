@@ -2,13 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-const TOP_ANGLE = -Math.PI / 2; // pointer at top
+const TOP_ANGLE = -Math.PI / 2;
 const label = (seg) =>
-  seg?.type === 'item'
-    ? seg.name
-    : seg?.type === 'coins'
-    ? `+${seg.amount} coins`
-    : 'Another spin';
+  seg?.type === 'item' ? seg.name : seg?.type === 'coins' ? `+${seg.amount} coins` : 'Another spin';
 
 export default function WheelPage() {
   const canvasRef = useRef(null);
@@ -27,7 +23,7 @@ export default function WheelPage() {
     resultIndex: null,
     segments: [],
     spinStartAt: null,
-    durationMs: null
+    durationMs: null,
   });
   const [me, setMe] = useState(null);
 
@@ -42,7 +38,7 @@ export default function WheelPage() {
 
   const currentSpinKey = useRef(null);
 
-  // draw wheel
+  // draw
   const draw = (a, segs) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -80,7 +76,7 @@ export default function WheelPage() {
       ctx.restore();
     }
     ctx.restore();
-    // pointer at top
+    // pointer
     ctx.beginPath();
     ctx.moveTo(cx, 8);
     ctx.lineTo(cx - 12, 28);
@@ -89,24 +85,17 @@ export default function WheelPage() {
     ctx.fillStyle = '#ef4444';
     ctx.fill();
   };
-  useEffect(() => {
-    draw(angle, segments);
-  }, [angle, segments]);
+  useEffect(() => { draw(angle, segments); }, [angle, segments]);
 
   // helpers
   const getMe = async () => {
     const r = await fetch('/api/me', { cache: 'no-store' });
-    if (!r.ok) {
-      setMe(null);
-      return false;
-    }
+    if (!r.ok) { setMe(null); return false; }
     const j = await r.json();
-    setMe(j);
-    setBalance(j.balance || 0);
+    setMe(j); setBalance(j.balance || 0);
     return true;
   };
   const getSegments = async (w) => {
-    // optional endpoint; safe to ignore if not present
     try {
       const r = await fetch(`/api/segments?tier=${w}`, { cache: 'no-store' });
       if (r.ok) {
@@ -115,40 +104,14 @@ export default function WheelPage() {
       }
     } catch {}
   };
-  const getAllItems = async () => {
-    try {
-      const r = await fetch('/api/items/all', { cache: 'no-store' });
-      if (r.ok) setAllItems(await r.json());
-    } catch {}
-  };
-  const getFeatured = async () => {
-    try {
-      const r = await fetch('/api/users/featured', { cache: 'no-store' });
-      if (r.ok) setFeaturedUsers(await r.json());
-    } catch {}
-  };
-  const getLatestWins = async () => {
-    try {
-      const r = await fetch('/api/spin/latest', { cache: 'no-store' });
-      if (r.ok) setLatestWins(await r.json());
-    } catch {}
-  };
-  const getStore = async () => {
-    try {
-      const r = await fetch('/api/store/list', { cache: 'no-store' });
-      if (r.ok) setStoreItems(await r.json());
-    } catch {}
-  };
+  const getAllItems = async () => { try { const r = await fetch('/api/items/all', { cache: 'no-store' }); if (r.ok) setAllItems(await r.json()); } catch {} };
+  const getFeatured = async () => { try { const r = await fetch('/api/users/featured', { cache: 'no-store' }); if (r.ok) setFeaturedUsers(await r.json()); } catch {} };
+  const getLatestWins = async () => { try { const r = await fetch('/api/spin/latest', { cache: 'no-store' }); if (r.ok) setLatestWins(await r.json()); } catch {} };
+  const getStore = async () => { try { const r = await fetch('/api/store/list', { cache: 'no-store' }); if (r.ok) setStoreItems(await r.json()); } catch {} };
 
-  // start shared animation
+  // animate shared
   const startSharedSpin = (spin) => {
-    if (
-      !spin ||
-      !spin.segments?.length ||
-      typeof spin.resultIndex !== 'number' ||
-      !spin.spinStartAt
-    )
-      return;
+    if (!spin || !spin.segments?.length || typeof spin.resultIndex !== 'number' || !spin.spinStartAt) return;
     const key = `${spin.userId}-${spin.resultIndex}-${spin.spinStartAt}`;
     if (currentSpinKey.current === key) return;
     currentSpinKey.current = key;
@@ -177,21 +140,10 @@ export default function WheelPage() {
       } else {
         rafRef.current = null;
         const seg = spin.segments[spin.resultIndex];
-        // show popup
-        if (seg?.type === 'item')
-          setPopup({
-            text: `'${spin.username}' siz '${seg.name}' yutib oldingiz🎉`,
-            imageUrl: seg.imageUrl || null
-          });
-        else if (seg?.type === 'coins')
-          setPopup({
-            text: `'${spin.username}' siz +${seg.amount} tangalarni yutib oldingiz🎉`,
-            imageUrl: null
-          });
+        if (seg?.type === 'item') setPopup({ text: `'${spin.username}' siz '${seg.name}' yutib oldingiz🎉`, imageUrl: seg.imageUrl || null });
+        else if (seg?.type === 'coins') setPopup({ text: `'${spin.username}' siz +${seg.amount} tangalarni yutib oldingiz🎉`, imageUrl: null });
         else setPopup({ text: `'${spin.username}' uchun yana bir aylantirish!`, imageUrl: null });
-
-        // *** IMPORTANT: tell server to apply reward & unlock ***
-        completeSpin();
+        completeSpin(); // tell server to award and unlock
       }
     };
     rafRef.current = requestAnimationFrame(run);
@@ -219,72 +171,34 @@ export default function WheelPage() {
       const id2 = setInterval(getFeatured, 3000);
       const id3 = setInterval(getLatestWins, 4000);
       const id4 = setInterval(getStore, 6000);
-      return () => {
-        clearInterval(id1);
-        clearInterval(id2);
-        clearInterval(id3);
-        clearInterval(id4);
-        if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      };
+      return () => { clearInterval(id1); clearInterval(id2); clearInterval(id3); clearInterval(id4); if (rafRef.current) cancelAnimationFrame(rafRef.current); };
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // auto-close popup after 10s
+  // auto-close popup
   useEffect(() => {
     if (!popup) return;
     setPopupCountdown(10);
     const tick = setInterval(() => {
-      setPopupCountdown((s) => {
-        if (s <= 1) {
-          clearInterval(tick);
-          setPopup(null);
-          return 0;
-        }
-        return s - 1;
-      });
+      setPopupCountdown((s) => { if (s <= 1) { clearInterval(tick); setPopup(null); return 0; } return s - 1; });
     }, 1000);
     return () => clearInterval(tick);
   }, [popup]);
 
-  // actions
-  const changeWager = (w) => {
-    setWager(w);
-    getSegments(w);
-  };
+  const changeWager = (w) => { setWager(w); getSegments(w); };
 
   const spin = async () => {
-    setErr('');
-    setPopup(null);
-
-    // Ensure auth (optional: Telegram auto-login you already have elsewhere)
+    setErr(''); setPopup(null);
     const authed = await getMe();
-    if (!authed) {
-      setErr('Iltimos, /login orqali kiring');
-      return;
-    }
-
-    if (state.status === 'SPINNING' && state.userId && state.userId !== me?.id) {
-      setErr(`Band: hozir ${state.username} aylanmoqda`);
-      return;
-    }
-
+    if (!authed) { setErr('Iltimos, /login orqali kiring'); return; }
+    if (state.status === 'SPINNING' && state.userId && state.userId !== me?.id) { setErr(`Band: hozir ${state.username} aylanmoqda`); return; }
     setSpinning(true);
-    const r = await fetch('/api/spin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ wager })
-    });
+    const r = await fetch('/api/spin', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ wager }) });
     const j = await r.json();
-    if (!r.ok) {
-      setErr(j.error || 'xato');
-      setSpinning(false);
-      return;
-    }
-    // animate shared spin
+    if (!r.ok) { setErr(j.error||'xato'); setSpinning(false); return; }
     startSharedSpin(j);
-    // balance already decremented on server; refresh me
-    await getMe();
+    await getMe(); // balance decreased
     setSpinning(false);
   };
 
@@ -294,23 +208,13 @@ export default function WheelPage() {
       if (r.ok) {
         await getMe();
         await getLatestWins();
-        await pollState(); // should become IDLE
+        await pollState();
       }
     } catch {}
   };
 
-  // simple UI (unchanged structure)
   return (
-    <div
-      style={{
-        padding: '24px',
-        paddingTop: 74,
-        fontFamily: 'system-ui, sans-serif',
-        color: '#e5e7eb',
-        background: '#111',
-        minHeight: '100vh'
-      }}
-    >
+    <div style={{ padding: '24px', paddingTop: 74, fontFamily:'system-ui, sans-serif', color:'#e5e7eb', background:'#111', minHeight:'100vh' }}>
       <style>{`
         .wrap { display:grid; grid-template-columns: 260px 1fr 260px; gap:20px; align-items:start; }
         @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } .side { order: 3; } .side-right { order: 4; } .center { order: 2; } }
@@ -322,133 +226,70 @@ export default function WheelPage() {
       `}</style>
 
       <div className="wrap">
-        {/* LEFT column */}
+        {/* LEFT */}
         <div className="side">
-          <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card" style={{marginBottom:16}}>
             <div className="title">Qoidalar (tanga olish)</div>
-            <ul style={{ margin: 0, paddingLeft: 16, lineHeight: 1.6 }}>
+            <ul style={{margin:0, paddingLeft:16, lineHeight:1.6}}>
               <li>Onlayn <b>300.000 so‘m</b> = <b>10 tanga</b></li>
               <li>Oflayn <b>1.000.000 so‘m</b> = <b>10 tanga</b></li>
             </ul>
-            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>
-              Admin bu ro‘yxatni kerak bo‘lsa keyin kengaytirishi mumkin.
-            </div>
+            <div style={{fontSize:12, opacity:.8, marginTop:6}}>Admin bu ro‘yxatni kerak bo‘lsa keyin kengaytirishi mumkin.</div>
           </div>
 
           <div className="card">
             <div className="title">Oxirgi 5 yutuq</div>
             {latestWins.length === 0 ? (
-              <div style={{ opacity: 0.8 }}>Hali yutuqlar ro‘yxati yo‘q.</div>
+              <div style={{opacity:.8}}>Hali yutuqlar ro‘yxati yo‘q.</div>
             ) : (
-              <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', lineHeight: 1.6 }}>
-                {latestWins.map((w) => (
-                  <li
-                    key={w.id}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      gap: 8,
-                      padding: '6px 0',
-                      borderBottom: '1px dashed #374151'
-                    }}
-                  >
-                    <span style={{ maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {w.displayName}
-                    </span>
-                    <span title={new Date(w.when).toLocaleString()} style={{ opacity: 0.8, fontSize: 12 }}>
-                      {new Date(w.when).toLocaleTimeString()}
-                    </span>
-                    <b style={{ maxWidth: '35%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {w.prize}
-                    </b>
+              <ul style={{margin:0, paddingLeft:0, listStyle:'none', lineHeight:1.6}}>
+                {latestWins.map(w => (
+                  <li key={w.id} style={{display:'flex', justifyContent:'space-between', gap:8, padding:'6px 0', borderBottom:'1px dashed #374151'}}>
+                    <span style={{maxWidth:'60%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{w.displayName}</span>
+                    <span title={new Date(w.when).toLocaleString()} style={{opacity:.8, fontSize:12}}>{new Date(w.when).toLocaleTimeString()}</span>
+                    <b style={{maxWidth:'35%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{w.prize}</b>
                   </li>
                 ))}
               </ul>
             )}
-            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>Ro‘yxat har 4 soniyada yangilanadi.</div>
+            <div style={{fontSize:12, opacity:.8, marginTop:6}}>Ro‘yxat har 4 soniyada yangilanadi.</div>
           </div>
         </div>
 
-        {/* CENTER column */}
-        <div className="center" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button
-              onClick={() => (setWager(50), getSegments(50))}
-              disabled={spinning}
-              className="pill"
-              style={{ background: wager === 50 ? '#2563eb' : '#0b0b0b' }}
-            >
-              50 tanga
-            </button>
-            <button
-              onClick={() => (setWager(100), getSegments(100))}
-              disabled={spinning}
-              className="pill"
-              style={{ background: wager === 100 ? '#2563eb' : '#0b0b0b' }}
-            >
-              100 tanga
-            </button>
-            <button
-              onClick={() => (setWager(200), getSegments(200))}
-              disabled={spinning}
-              className="pill"
-              style={{ background: wager === 200 ? '#2563eb' : '#0b0b0b' }}
-            >
-              200 tanga
-            </button>
+        {/* CENTER */}
+        <div className="center" style={{display:'flex', flexDirection:'column', alignItems:'center', gap:12}}>
+          <div style={{display:'flex', gap:8, marginTop:4}}>
+            <button onClick={()=> (setWager(50), getSegments(50))}  disabled={spinning} className="pill" style={{background:wager===50?'#2563eb':'#0b0b0b'}}>50 tanga</button>
+            <button onClick={()=> (setWager(100), getSegments(100))} disabled={spinning} className="pill" style={{background:wager===100?'#2563eb':'#0b0b0b'}}>100 tanga</button>
+            <button onClick={()=> (setWager(200), getSegments(200))} disabled={spinning} className="pill" style={{background:wager===200?'#2563eb':'#0b0b0b'}}>200 tanga</button>
           </div>
 
-          <div style={{ marginTop: 4, color: '#cbd5e1' }}>
+          <div style={{marginTop:4, color:'#cbd5e1'}}>
             {state.status === 'SPINNING' ? <b>Hozir: {state.username} aylanmoqda</b> : <span>Keyingi o‘yinchi tayyor!</span>}
           </div>
 
-          <canvas
-            ref={canvasRef}
-            style={{
-              borderRadius: '9999px',
-              boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
-              background: '#fff'
-            }}
-          />
+          <canvas ref={canvasRef} style={{ borderRadius:'9999px', boxShadow:'0 10px 30px rgba(0,0,0,0.35)', background:'#fff' }} />
 
           <div>Balans: <b>{balance}</b> tanga</div>
 
-          <button
-            onClick={spin}
-            disabled={spinning || (state.status === 'SPINNING' && state.userId && state.userId !== me?.id)}
-            className="btn"
-          >
+          <button onClick={spin} disabled={spinning || (state.status==='SPINNING' && state.userId && state.userId !== me?.id)} className="btn">
             {spinning ? 'Aylanyapti…' : `Spin (-${wager})`}
           </button>
 
           {/* items dropdown */}
-          <div style={{ marginTop: 8, width: 360, maxWidth: '100%' }}>
-            <button
-              onClick={() => {
-                setShowList(!showList);
-                if (!allItems.length) getAllItems();
-              }}
-              className="pill"
-              style={{ width: '100%' }}
-            >
+          <div style={{marginTop:8, width:360, maxWidth:'100%'}}>
+            <button onClick={()=>{ setShowList(!showList); if(!allItems.length) getAllItems(); }} className="pill" style={{width:'100%'}}>
               Barcha sovg‘alar (narxlari bilan) {showList ? '▲' : '▼'}
             </button>
             {showList && (
-              <div className="card" style={{ marginTop: 6, maxHeight: 260, overflow: 'auto' }}>
-                {[50, 100, 200, 500].map((tier) => (
-                  <div key={tier} style={{ marginBottom: 8 }}>
-                    <div className="title" style={{ marginBottom: 4, fontSize: 14 }}>
-                      {tier} tanga
-                    </div>
-                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+              <div className="card" style={{marginTop:6, maxHeight:260, overflow:'auto'}}>
+                {[50,100,200,500].map(tier => (
+                  <div key={tier} style={{marginBottom:8}}>
+                    <div className="title" style={{marginBottom:4, fontSize:14}}>{tier} tanga</div>
+                    <ul style={{margin:0, paddingLeft:18}}>
                       {allItems
-                        .filter((i) => i.tier === (tier === 50 ? 'T50' : tier === 100 ? 'T100' : tier === 200 ? 'T200' : 'T500'))
-                        .map((i) => (
-                          <li key={i.id} style={{ color: '#e5e7eb' }}>
-                            {i.name}
-                            {i.imageUrl ? ' 🖼️' : ''}
-                          </li>
-                        ))}
+                        .filter(i => i.tier === (tier===50?'T50':tier===100?'T100':tier===200?'T200':'T500'))
+                        .map(i => (<li key={i.id} style={{color:'#e5e7eb'}}>{i.name}{i.imageUrl ? ' 🖼️' : ''}</li>))}
                     </ul>
                   </div>
                 ))}
@@ -456,83 +297,48 @@ export default function WheelPage() {
             )}
           </div>
 
-          {err && <div style={{ color: '#fca5a5' }}>{err}</div>}
+          {err && <div style={{color:'#fca5a5'}}>{err}</div>}
         </div>
 
-        {/* RIGHT column */}
+        {/* RIGHT */}
         <div className="side side-right">
-          <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card" style={{marginBottom:16}}>
             <div className="title">Ishtirokchilar balansi</div>
             {featuredUsers.length === 0 ? (
-              <div style={{ opacity: 0.8 }}>Hozircha ro‘yxat bo‘sh. Admin “Users” sahifasida belgilaydi.</div>
+              <div style={{opacity:.8}}>Hozircha ro‘yxat bo‘sh. Admin “Users” sahifasida belgilaydi.</div>
             ) : (
-              <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', lineHeight: 1.6 }}>
-                {featuredUsers.map((u) => (
-                  <li
-                    key={u.id}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      gap: 8,
-                      padding: '4px 0',
-                      borderBottom: '1px dashed #374151'
-                    }}
-                  >
+              <ul style={{margin:0, paddingLeft:0, listStyle:'none', lineHeight:1.6}}>
+                {featuredUsers.map(u=>(
+                  <li key={u.id} style={{display:'flex', justifyContent:'space-between', gap:8, padding:'4px 0', borderBottom:'1px dashed #374151'}}>
                     <span>{u.displayName}</span>
                     <b>{u.balance}</b>
                   </li>
                 ))}
               </ul>
             )}
-            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 6 }}>
-              Ro‘yxat har 3 soniyada yangilanadi.
-            </div>
+            <div style={{fontSize:12, opacity:.8, marginTop:6}}>Ro‘yxat har 3 soniyada yangilanadi.</div>
           </div>
 
           {/* Store */}
           <div className="card">
             <div className="title">Do‘kon (spin’siz xarid)</div>
             {storeItems.length === 0 ? (
-              <div style={{ opacity: 0.8 }}>Hozircha sotib olishga ruxsat etilgan mahsulotlar yo‘q.</div>
+              <div style={{opacity:.8}}>Hozircha sotib olishga ruxsat etilgan mahsulotlar yo‘q.</div>
             ) : (
-              <ul
-                style={{
-                  margin: 0,
-                  paddingLeft: 0,
-                  listStyle: 'none',
-                  display: 'grid',
-                  gap: 8
-                }}
-              >
-                {storeItems.map((it) => (
-                  <li key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    {it.imageUrl && (
-                      <img
-                        src={it.imageUrl}
-                        alt=""
-                        style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }}
-                      />
-                    )}
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600 }}>{it.name}</div>
-                      <div style={{ fontSize: 12, opacity: 0.8 }}>{it.price} tanga</div>
+              <ul style={{margin:0, paddingLeft:0, listStyle:'none', display:'grid', gap:8}}>
+                {storeItems.map(it=>(
+                  <li key={it.id} style={{display:'flex', alignItems:'center', gap:10}}>
+                    {it.imageUrl && <img src={it.imageUrl} alt="" style={{width:36, height:36, objectFit:'cover', borderRadius:6}}/>}
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:600}}>{it.name}</div>
+                      <div style={{fontSize:12, opacity:.8}}>{it.price} tanga</div>
                     </div>
-                    <button onClick={() => buy(it.id)} className="pill" style={{ whiteSpace: 'nowrap' }}>
-                      Sotib olish
-                    </button>
+                    <button className="pill" style={{whiteSpace:'nowrap'}}>Sotib olish</button>
                   </li>
                 ))}
               </ul>
             )}
-            <div
-              style={{
-                fontSize: 12,
-                opacity: 0.8,
-                marginTop: 6,
-                borderTop: '1px dashed #374151',
-                paddingTop: 6
-              }}
-            >
+            <div style={{fontSize:12, opacity:.8, marginTop:6, borderTop:'1px dashed #374151', paddingTop:6}}>
               Store items ko‘rsatilmoqda: <b>{storeItems.length}</b> ta.
             </div>
           </div>
@@ -541,35 +347,12 @@ export default function WheelPage() {
 
       {/* POPUP */}
       {popup && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 50
-          }}
-          onClick={() => setPopup(null)}
-        >
-          <div
-            style={{ background: 'white', padding: 20, borderRadius: 12, maxWidth: 320, textAlign: 'center' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {popup.imageUrl && (
-              <img src={popup.imageUrl} alt="prize" style={{ width: '100%', borderRadius: 8, marginBottom: 12 }} />
-            )}
-            <div style={{ fontWeight: 700, marginBottom: 8, color: '#111' }}>{popup.text}</div>
-            <div style={{ fontSize: 12, color: '#444', marginBottom: 10 }}>
-              {popupCountdown > 0 ? `(yopiladi: ${popupCountdown}s)` : ''}
-            </div>
-            <button
-              onClick={() => setPopup(null)}
-              style={{ padding: '8px 12px', borderRadius: 8, background: 'black', color: 'white' }}
-            >
-              OK
-            </button>
+        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:50}} onClick={()=>setPopup(null)}>
+          <div style={{background:'white', padding:20, borderRadius:12, maxWidth:320, textAlign:'center'}} onClick={(e)=>e.stopPropagation()}>
+            {popup.imageUrl && <img src={popup.imageUrl} alt="prize" style={{width:'100%', borderRadius:8, marginBottom:12}}/>}
+            <div style={{fontWeight:700, marginBottom:8, color:'#111'}}>{popup.text}</div>
+            <div style={{fontSize:12, color:'#444', marginBottom:10}}>{popupCountdown > 0 ? `(yopiladi: ${popupCountdown}s)` : ''}</div>
+            <button onClick={()=>setPopup(null)} style={{padding:'8px 12px', borderRadius:8, background:'black', color:'white'}}>OK</button>
           </div>
         </div>
       )}
