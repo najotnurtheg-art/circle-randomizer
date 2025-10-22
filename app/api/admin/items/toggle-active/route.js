@@ -1,29 +1,25 @@
-// app/api/admin/items/toggle-active/route.js
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
-import { NextResponse } from 'next/server';
-import { prisma } from '@/app/lib/prisma';
-import { requireAdmin } from '@/app/lib/auth';
+import { NextResponse } from "next/server";
+import prisma from "@/app/lib/prisma";
 
 export async function POST(req) {
-  try { requireAdmin(); } catch { return NextResponse.json({ error: 'forbidden' }, { status: 403 }); }
-
   try {
     const { id, active } = await req.json();
-    if (!id || typeof active !== 'boolean') {
-      return NextResponse.json({ error: 'bad_request' }, { status: 400 });
+
+    if (!id) {
+      return NextResponse.json({ error: "Missing item ID" }, { status: 400 });
     }
 
-    const item = await prisma.item.update({
+    const updated = await prisma.item.update({
       where: { id },
-      data: { isActive: active },
-      select: { id: true, isActive: true },
+      data: { active: Boolean(active) },
     });
 
-    return NextResponse.json(item);
-  } catch (e) {
-    console.error('toggle-active error', e);
-    return NextResponse.json({ error: 'server' }, { status: 500 });
+    return NextResponse.json(updated);
+  } catch (error) {
+    console.error("Toggle active failed:", error);
+    return NextResponse.json(
+      { error: "Server error while toggling item" },
+      { status: 500 }
+    );
   }
 }
