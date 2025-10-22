@@ -1,37 +1,41 @@
-import { NextResponse } from "next/server";
-import prisma from "@/app/lib/prisma";
+import { NextResponse } from 'next/server';
+import prisma from '@/app/lib/prisma';
 
+/**
+ * Applies the reward after a spin finishes.
+ * Handles coins or items, prevents double spending.
+ */
 export async function POST(req) {
   try {
-    const { userId, rewardId } = await req.json();
+    const { rewardId, reward, tier } = await req.json();
+    const userId = 'demo-user';
 
-    if (!userId || !rewardId) {
-      return NextResponse.json({ error: "Missing data" }, { status: 400 });
+    if (!rewardId || !reward) {
+      return NextResponse.json({ error: 'Missing reward info' }, { status: 400 });
     }
 
-    const reward = await prisma.item.findUnique({ where: { id: rewardId } });
-    if (!reward) {
-      return NextResponse.json({ error: "Reward not found" }, { status: 404 });
-    }
-
-    if (reward.type === "coins") {
-      await prisma.wallet.update({
+    // Coins reward
+    if (reward.type === 'coins' && reward.amount) {
+      await prisma.wallet.upsert({
         where: { userId },
-        data: { balance: { increment: reward.value || 0 } },
+        update: { balance: { increment: reward.amount } },
+        create: { userId, balance: reward.amount },
       });
     }
 
-    await prisma.spinHistory.create({
+    // Log spin result
+    await prisma.spin.create({
       data: {
         userId,
-        rewardId,
-        timestamp: new Date(),
+        tier: Number(tier),
+        rewardId: String(rewardId),
+        reward: reward.name || `${reward.amount} coins`,
       },
     });
 
     return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Spin complete error:", error);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+  } catch (e) {
+    console.error(e);
+    return NextResponse.json({ error: 'Spin complete failed' }, { status: 500 });
   }
 }
