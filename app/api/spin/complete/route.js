@@ -5,81 +5,108 @@ export const revalidate = 0;
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 import { getUser } from '@/app/lib/auth';
-import { prizeText } from '../../_lib/segments';
 
 export async function POST() {
   try {
     const me = await getUser();
 
-    const s = await prisma.spinState.findUnique({ where:{ id:'global' } });
+    // Load current spin state
+    const s = await prisma.spinState.findUnique({ where: { id: 'global' } });
+
+    // Nothing to complete
     if (!s || s.status !== 'SPINNING' || !s.spinStartAt) {
-      return NextResponse.json({ ok:true, message:'no_active_spin' });
+      return NextResponse.json({ ok: true, message: 'no_active_spin' });
     }
 
-    const expired = Date.now() >= (new Date(s.spinStartAt).getTime() + Number(s.durationMs || 0));
-    if (s.userId !== me.sub && !expired) {
-      return NextResponse.json({ error:'forbidden' }, { status:403 });
+    // Only the spinner can complete before it naturally expires
+    const hasExpired =
+      Date.now() >= new Date(s.spinStartAt).getTime() + Number(s.durationMs || 0);
+
+    if (s.userId && s.userId !== me.sub && !hasExpired) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
     }
 
-    const reward = s.pendingReward; // the weighted segment object
+    const reward = s.pendingReward || null;
+    const targetUserId = s.userId || me.sub; // just in case
+    const username = s.username || 'Guest';
+    const wager = Number(s.wager || 0);
+
     let popup = null;
 
-    // apply reward
-    if (reward?.type === 'coins') {
+    if (reward && reward.type === 'coins') {
+      // Upsert wallet and add coins
       const w = await prisma.wallet.upsert({
-        where:{ userId: s.userId! },
-        update:{},
-        create:{ userId: s.userId!, balance:0 }
+        where: { userId: targetUserId },
+        update: {},
+        create: { userId: targetUserId, balance: 0 },
       });
+
       await prisma.wallet.update({
-        where:{ id: w.id },
-        data:{ balance: { increment: Number(reward.amount || 0) } }
+        where: { id: w.id },
+        data: { balance: { increment: Number(reward.amount || 0) } },
       });
-      popup = { text: `'${s.username}' siz +${reward.amount} tangalarni yutib oldingiz🎉`, imageUrl: null };
+
+      popup = {
+        text: `'${username}' siz +${reward.amount} tangalarni yutib oldingiz🎉`,
+        imageUrl: null,
+      };
+
       await prisma.spinLog.create({
-        data:{
-          userId: s.userId!,
-          username: s.username || '',
-          wager: s.wager || 0,
-          prize: `+${reward.amount} coins`
-        }
+        data: {
+          userId: targetUserId,
+          username,
+          wager,
+          prize: `+${reward.amount} coins`,
+        },
       });
-    } else if (reward?.type === 'item') {
-      popup = { text: `'${s.username}' siz '${reward.name}' yutib oldingiz🎉`, imageUrl: reward.imageUrl || null };
+    } else if (reward && reward.type === 'item') {
+      // Log item reward
+      popup = {
+        text: `'${username}' siz '${reward.name}' yutib oldingiz🎉`,
+        imageUrl: reward.imageUrl || null,
+      };
+
       await prisma.spinLog.create({
-        data:{
-          userId: s.userId!,
-          username: s.username || '',
-          wager: s.wager || 0,
-          prize: reward.name || 'Prize'
-        }
+        data: {
+          userId: targetUserId,
+          username,
+          wager,
+          prize: reward.name || 'Prize',
+        },
       });
     } else {
-      popup = { text: `'${s.username}' uchun yana bir aylantirish!`, imageUrl: null };
+      // Respin / fallback
+      popup = { text: `'${username}' uchun yana bir aylantirish!`, imageUrl: null };
+
       await prisma.spinLog.create({
-        data:{
-          userId: s.userId!,
-          username: s.username || '',
-          wager: s.wager || 0,
-          prize: 'Another spin'
-        }
+        data: {
+          userId: targetUserId,
+          username,
+          wager,
+          prize: 'Another spin',
+        },
       });
     }
 
-    // reset the shared state
+    // Reset global spin state
     await prisma.spinState.update({
-      where:{ id:'global' },
-      data:{
-        status:'IDLE',
-        userId: null, username: null, wager: null,
-        segments: [], resultIndex: null, spinStartAt: null, durationMs: null,
-        pendingReward: null
-      }
+      where: { id: 'global' },
+      data: {
+        status: 'IDLE',
+        userId: null,
+        username: null,
+        wager: null,
+        segments: [],
+        resultIndex: null,
+        spinStartAt: null,
+        durationMs: null,
+        pendingReward: null,
+      },
     });
 
-    return NextResponse.json({ ok:true, popup });
-  } catch (e) {
-    console.error('spin complete error', e);
-    return NextResponse.json({ error:'server' }, { status:500 });
+    return NextResponse.json({ ok: true, popup });
+  } catch (err) {
+    console.error('spin complete error', err);
+    return NextResponse.json({ error: 'server' }, { status: 500 });
   }
 }
