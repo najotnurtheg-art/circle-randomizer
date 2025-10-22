@@ -4,31 +4,27 @@ export const revalidate = 0;
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 
-const ID = 'global';
-
-function idle() {
-  return { status: 'IDLE', userId: null, username: null, wager: null, segments: [], resultIndex: null, spinStartAt: null, durationMs: null };
-}
-
 export async function GET() {
-  let s = await prisma.spinState.findUnique({ where: { id: ID } });
-  if (!s) s = await prisma.spinState.create({ data: { id: ID, status: 'IDLE' } });
-
-  // expire stuck spins
-  if (s.status === 'SPINNING' && s.spinStartAt && s.durationMs) {
-    const started = new Date(s.spinStartAt).getTime();
-    if (Date.now() > started + Number(s.durationMs) + 1500) {
-      await prisma.spinState.update({
-        where: { id: ID },
-        data: { status: 'IDLE', userId: null, username: null, wager: null, segments: [], resultIndex: null, spinStartAt: null, durationMs: null },
-      });
-      return NextResponse.json(idle(), { headers: { 'Cache-Control': 'no-store' } });
+  try {
+    let s = await prisma.spinState.findUnique({ where: { id: 'global' } });
+    if (!s) {
+      s = await prisma.spinState.create({ data: { id: 'global', status: 'IDLE' } });
     }
+
+    // Do NOT auto-clear here; /complete will apply reward & clear.
+    return NextResponse.json({
+      status: s.status,
+      userId: s.userId || null,
+      username: s.username || null,
+      wager: s.wager || null,
+      segments: s.segments || [],
+      resultIndex: s.resultIndex ?? null,
+      spinStartAt: s.spinStartAt || null,
+      durationMs: s.durationMs || null,
+      updatedAt: s.updatedAt
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (e) {
+    console.error('state GET error', e);
+    return NextResponse.json({ error: 'server_error' }, { status: 500 });
   }
-
-  const payload = s.status === 'SPINNING'
-    ? { status: 'SPINNING', userId: s.userId, username: s.username, wager: s.wager, segments: s.segments || [], resultIndex: s.resultIndex, spinStartAt: s.spinStartAt, durationMs: s.durationMs || 10000 }
-    : idle();
-
-  return NextResponse.json(payload, { headers: { 'Cache-Control': 'no-store' } });
 }
