@@ -6,14 +6,15 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 
 export async function GET() {
-  const items = await prisma.item.findMany({
-    where:{ isActive:true },
-    orderBy:[{ tier:'asc' }, { createdAt:'asc' }]
-  });
-  const out = items.map(i => ({
-    id: i.id, name: i.name,
-    tier: i.tier === 'T50' ? 50 : i.tier === 'T100' ? 100 : i.tier === 'T200' ? 200 : 500,
-    imageUrl: i.imageUrl || null
-  }));
-  return NextResponse.json(out, { headers:{'Cache-Control':'no-store'} });
+  try {
+    const items = await prisma.item.findMany({
+      orderBy: [{ tier: 'asc' }, { createdAt: 'desc' }],
+      select: { id: true, name: true, tier: true, imageUrl: true, isActive: true },
+    });
+
+    return NextResponse.json(items, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (e) {
+    console.error('items/all error', e);
+    return NextResponse.json([], { headers: { 'Cache-Control': 'no-store' } });
+  }
 }
