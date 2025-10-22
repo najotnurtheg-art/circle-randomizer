@@ -11,18 +11,21 @@ export async function GET() {
       s = await prisma.spinState.create({ data: { id: 'global', status: 'IDLE' } });
     }
 
-    // Do NOT auto-clear here; /complete will apply reward & clear.
-    return NextResponse.json({
-      status: s.status,
-      userId: s.userId || null,
-      username: s.username || null,
-      wager: s.wager || null,
-      segments: s.segments || [],
-      resultIndex: s.resultIndex ?? null,
-      spinStartAt: s.spinStartAt || null,
-      durationMs: s.durationMs || null,
-      updatedAt: s.updatedAt
-    }, { headers: { 'Cache-Control': 'no-store' } });
+    // Do NOT auto-clear here; /complete will clear.
+    return NextResponse.json(
+      {
+        status: s.status,
+        userId: s.userId || null,
+        username: s.username || null,
+        wager: s.wager || null,
+        segments: s.segments || [],
+        resultIndex: s.resultIndex ?? null,
+        spinStartAt: s.spinStartAt || null,
+        durationMs: s.durationMs || null,
+        updatedAt: s.updatedAt,
+      },
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
   } catch (e) {
     console.error('state GET error', e);
     return NextResponse.json({ error: 'server_error' }, { status: 500 });
