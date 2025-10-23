@@ -7,17 +7,12 @@ import { getUser } from '@/app/lib/auth';
 
 const TIER = { 50: 'T50', 100: 'T100', 200: 'T200', 500: 'T500' };
 
-// weight scale
-const W = {
-  NORMAL: 10,
-  HARDER_2X: 5,
-  HARDER_3X: 3,
-  HARDER_5X: 2,
-};
+// weight constants
+const W = { NORMAL: 10, HARDER_2X: 5, HARDER_3X: 3, HARDER_5X: 2 };
 
+// weighted random pick
 function pickWeightedIndex(weights) {
   const total = weights.reduce((a, b) => a + b, 0);
-  if (total <= 0) return 0;
   let t = Math.random() * total;
   for (let i = 0; i < weights.length; i++) {
     t -= weights[i];
@@ -26,18 +21,17 @@ function pickWeightedIndex(weights) {
   return weights.length - 1;
 }
 
-function pickRandomDistinct(arr, count) {
+// small helper to get N random distinct
+function pickRandomDistinct(arr, n) {
   const a = [...arr];
-  // Fisher–Yates shuffle (partial)
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }
-  return a.slice(0, Math.min(count, a.length));
+  return a.slice(0, Math.min(n, a.length));
 }
 
-async function buildWeightedSpec(wager) {
-  // Pull all active items once
+async function buildWeightedSegments(wager) {
   const items = await prisma.item.findMany({
     where: { isActive: true },
     orderBy: { createdAt: 'desc' },
@@ -49,64 +43,39 @@ async function buildWeightedSpec(wager) {
   const t200 = items.filter(i => i.tier === 'T200');
   const t500 = items.filter(i => i.tier === 'T500');
 
-  // base structures
-  const baseSegs = [];   // what we send to client (unique slices, no duplication)
-  const weights  = [];   // server-side weights aligned by index in baseSegs
+  const segs = [];
+  const weights = [];
 
-  const pushItem = (it, weight) => {
-    baseSegs.push({ type: 'item', id: it.id, name: it.name, imageUrl: it.imageUrl ?? null });
-    weights.push(weight);
+  const pushItem = (it, w) => {
+    segs.push({ type: 'item', id: it.id, name: it.name, imageUrl: it.imageUrl ?? null });
+    weights.push(w);
   };
-  const pushCoins = (amount, weight) => {
-    baseSegs.push({ type: 'coins', amount });
-    weights.push(weight);
-  };
-  const pushRespin = (weight) => {
-    baseSegs.push({ type: 'respin', label: 'Another spin' });
-    weights.push(weight);
-  };
+  const pushCoins = (amount, w) => { segs.push({ type: 'coins', amount }); weights.push(w); };
+  const pushRespin = (w) => { segs.push({ type: 'respin', label: 'Another spin' }); weights.push(w); };
 
   if (wager === 50) {
-    // all items T50 normal
     t50.forEach(it => pushItem(it, W.NORMAL));
-    // + 2 items T100 as 3x harder
-    pickRandomDistinct(t100, 2).forEach(it => pushItem(it, W.HARDER_3X));
-    // +75 coins as 2x harder
+    pickRandomDistinct(t100, 2).forEach(it => pushItem(it, W.HARDER_2X));
     pushCoins(75, W.HARDER_2X);
-    // another spin normal
     pushRespin(W.NORMAL);
   } else if (wager === 100) {
-    // all items T100 normal
     t100.forEach(it => pushItem(it, W.NORMAL));
-    // + 2 items T200 as 3x harder
     pickRandomDistinct(t200, 2).forEach(it => pushItem(it, W.HARDER_3X));
-    // + 2 items T50 as 3x harder
-    pickRandomDistinct(t50, 2).forEach(it => pushItem(it, W.HARDER_3X));
-    // +150 coins as 2x harder
+    pickRandomDistinct(t50, 2).forEach(it => pushItem(it, W.HARDER_2X));
     pushCoins(150, W.HARDER_2X);
-    // another spin normal
     pushRespin(W.NORMAL);
   } else if (wager === 200) {
-    // all items T200 normal
     t200.forEach(it => pushItem(it, W.NORMAL));
-    // + 2 items T500 as 5x harder
-    pickRandomDistinct(t500, 2).forEach(it => pushItem(it, W.HARDER_5X));
-    // + 2 items T100 as 2x harder
+    pickRandomDistinct(t500, 2).forEach(it => pushItem(it, W.HARDER_3X));
     pickRandomDistinct(t100, 2).forEach(it => pushItem(it, W.HARDER_2X));
-    // +300 coins as 3x harder
     pushCoins(300, W.HARDER_3X);
-    // another spin normal
     pushRespin(W.NORMAL);
   } else {
-    // safety net
     pushRespin(W.NORMAL);
   }
 
-  // Ensure we have at least 6 slices
-  while (baseSegs.length < 6) {
-    pushRespin(W.NORMAL);
-  }
-  return { baseSegs, weights };
+  while (segs.length < 6) pushRespin(W.NORMAL);
+  return { segs, weights };
 }
 
 export async function POST(req) {
@@ -120,16 +89,13 @@ export async function POST(req) {
       return NextResponse.json({ error: 'invalid_wager' }, { status: 400 });
     }
 
-    // load or init global state
     let s = await prisma.spinState.findUnique({ where: { id: 'global' } });
     if (!s) s = await prisma.spinState.create({ data: { id: 'global', status: 'IDLE' } });
 
-    // check busy
     if (s.status === 'SPINNING' && s.userId && s.userId !== me.sub) {
       return NextResponse.json({ error: 'busy', username: s.username || 'other' }, { status: 409 });
     }
 
-    // balance
     const wallet = await prisma.wallet.upsert({
       where: { userId: me.sub },
       update: {},
@@ -139,23 +105,16 @@ export async function POST(req) {
       return NextResponse.json({ error: 'not_enough_coins', balance: wallet.balance ?? 0 }, { status: 400 });
     }
 
-    // build weighted spec by wager
-    const { baseSegs, weights } = await buildWeightedSpec(w);
-    if (!baseSegs.length) {
-      return NextResponse.json({ error: 'no_segments' }, { status: 400 });
-    }
+    const { segs, weights } = await buildWeightedSegments(w);
+    if (!segs.length) return NextResponse.json({ error: 'no_segments' }, { status: 400 });
 
-    // choose result with weights
     const resultIndex = pickWeightedIndex(weights);
 
-    // deduct wager now
     await prisma.wallet.update({
       where: { userId: me.sub },
       data: { balance: { decrement: w } },
     });
 
-    // save shared spin for all clients
-    const durationMs = 10000;
     const updated = await prisma.spinState.update({
       where: { id: 'global' },
       data: {
@@ -163,26 +122,14 @@ export async function POST(req) {
         userId: me.sub,
         username: me.displayName || me.username || 'player',
         wager: w,
-        segments: baseSegs,         // NOTE: weights are server-only
+        segments: segs,
         resultIndex,
         spinStartAt: new Date(),
-        durationMs,
+        durationMs: 10000,
       },
     });
 
-    return NextResponse.json(
-      {
-        status: updated.status,
-        userId: updated.userId,
-        username: updated.username,
-        wager: updated.wager,
-        segments: updated.segments,
-        resultIndex: updated.resultIndex,
-        spinStartAt: updated.spinStartAt,
-        durationMs: updated.durationMs,
-      },
-      { headers: { 'Cache-Control': 'no-store' } }
-    );
+    return NextResponse.json(updated, { headers: { 'Cache-Control': 'no-store' } });
   } catch (e) {
     console.error('spin POST error', e);
     return NextResponse.json({ error: 'server_error' }, { status: 500 });
