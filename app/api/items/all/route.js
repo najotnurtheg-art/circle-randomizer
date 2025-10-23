@@ -1,13 +1,41 @@
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 
-const tierNum = (t) => t === 'T50' ? 50 : t === 'T100' ? 100 : t === 'T200' ? 200 : 500;
+// Map the enum -> numeric tier the UI expects
+const TIER_TO_NUM = {
+  T50: 50,
+  T100: 100,
+  T200: 200,
+  T500: 500,
+};
 
 export async function GET() {
-  const items = await prisma.item.findMany({
-    where: { isActive: true },
-    orderBy: [{ tier: 'asc' }, { createdAt: 'desc' }]
-  });
-  const out = items.map(i => ({ id:i.id, name:i.name, tier: tierNum(i.tier), imageUrl:i.imageUrl||null }));
-  return NextResponse.json(out);
+  try {
+    // Return *all* items (active or not) so the dropdown matches admin expectations
+    // If you want only active, add: where: { isActive: true }
+    const items = await prisma.item.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+    });
+
+    const out = items.map((it) => ({
+      id: it.id,
+      name: it.name,
+      // IMPORTANT: normalize enum -> number to match wheel UI filtering
+      tier: TIER_TO_NUM[it.tier] ?? null,
+      isActive: it.isActive,
+      purchasable: it.purchasable ?? false,
+      imageUrl: it.imageUrl ?? null,
+      createdAt: it.createdAt,
+      updatedAt: it.updatedAt,
+    }));
+
+    return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (e) {
+    console.error('/api/items/all GET failed', e);
+    return NextResponse.json({ error: 'server_error' }, { status: 500 });
+  }
 }
