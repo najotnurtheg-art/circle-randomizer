@@ -3,80 +3,126 @@ export const revalidate = 0;
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
-import { getUser } from '@/app/lib/auth';
+import { requireUser } from '@/app/lib/auth';
 
+/**
+ * Completes an in-flight spin:
+ *  - reads SpinState
+ *  - applies reward (coins add to wallet)
+ *  - logs SpinLog
+ *  - resets SpinState
+ * Returns: { balance, log, popup? }
+ */
 export async function POST() {
+  const me = await requireUser().catch(() => null);
+  if (!me) {
+    return NextResponse.json(
+      { error: 'unauthorized' },
+      { status: 401, headers: { 'Cache-Control': 'no-store' } }
+    );
+  }
+
   try {
-    const me = await getUser();
-    if (!me) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-
+    // Read current spin
     const s = await prisma.spinState.findUnique({ where: { id: 'global' } });
-    if (!s || s.status !== 'SPINNING' || !s.spinStartAt || !s.durationMs) {
-      return NextResponse.json({ error: 'no_active_spin' }, { status: 400 });
+
+    if (!s || s.status !== 'SPINNING' || !s.userId || s.userId !== me.sub) {
+      return NextResponse.json(
+        { error: 'no-active-spin' },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } }
+      );
     }
 
-    const start = new Date(s.spinStartAt).getTime();
-    const endAt = start + Number(s.durationMs);
-    const now = Date.now();
-
-    if (now < endAt - 50) {
-      return NextResponse.json({ error: 'too_early' }, { status: 400 });
-    }
-
-    // Only spinner can complete for first 5s after finish
-    const grace = endAt + 5000;
-    if (s.userId !== me.sub && now < grace) {
-      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
-    }
-
-    // Compute reward from saved segments+resultIndex
-    let prizeText = 'Another spin';
-    if (Array.isArray(s.segments) && typeof s.resultIndex === 'number' && s.segments[s.resultIndex]) {
-      const seg = s.segments[s.resultIndex];
-      if (seg?.type === 'coins') {
-        const amount = Number(seg.amount) || 0;
-        await prisma.wallet.upsert({
-          where: { userId: s.userId || me.sub },
-          update: { balance: { increment: amount } },
-          create: { userId: s.userId || me.sub, balance: amount },
-        });
-        prizeText = `+${amount} coins`;
-      } else if (seg?.type === 'item') {
-        prizeText = seg.name || 'Item';
-        // (No balance change for item. If you need stock control, add here.)
-      } else {
-        prizeText = 'Another spin';
+    // Extract the chosen reward from segments/resultIndex that were set on start
+    const rewardBlob = (() => {
+      try {
+        const segs = (s.segments ?? []) as any[];
+        const idx = s.resultIndex ?? -1;
+        return idx >= 0 && idx < segs.length ? segs[idx] : null;
+      } catch {
+        return null;
       }
+    })();
+
+    if (!rewardBlob) {
+      // Reset broken state so users aren’t stuck
+      await prisma.spinState.update({
+        where: { id: 'global' },
+        data: {
+          status: 'IDLE',
+          userId: null,
+          username: null,
+          wager: null,
+          segments: [],
+          resultIndex: null,
+          spinStartAt: null,
+          durationMs: null,
+        },
+      });
+      return NextResponse.json(
+        { error: 'reward-missing' },
+        { status: 500, headers: { 'Cache-Control': 'no-store' } }
+      );
     }
 
-    // Log win
-    await prisma.spinLog.create({
-      data: {
-        userId: s.userId || me.sub,
-        username: s.username || 'player',
-        wager: s.wager || 0,
-        prize: prizeText,
-      },
+    const isCoins = rewardBlob?.type === 'coins';
+    const coinsDelta = isCoins ? Number(rewardBlob.amount || 0) : 0;
+    const prizeName = isCoins ? `+${coinsDelta} coins` : String(rewardBlob?.name ?? 'Prize');
+
+    // Apply reward, write log, reset state — all in one transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // 1) Apply wallet change if prize is coins
+      if (isCoins) {
+        await tx.wallet.upsert({
+          where: { userId: me.sub },
+          update: { balance: { increment: coinsDelta } },
+          create: { userId: me.sub, balance: coinsDelta },
+        });
+      }
+
+      // 2) Create SpinLog NOW (prevents “only last spin appears”)
+      const log = await tx.spinLog.create({
+        data: {
+          userId: me.sub,
+          username: me.name || me.username || 'user',
+          wager: s.wager ?? 0,
+          prize: prizeName,
+        },
+      });
+
+      // 3) Reset the spin state
+      await tx.spinState.update({
+        where: { id: 'global' },
+        data: {
+          status: 'IDLE',
+          userId: null,
+          username: null,
+          wager: null,
+          segments: [],
+          resultIndex: null,
+          spinStartAt: null,
+          durationMs: null,
+        },
+      });
+
+      // 4) Return current balance for the UI
+      const w = await tx.wallet.findUnique({ where: { userId: me.sub } });
+
+      return { balance: w?.balance ?? 0, log };
     });
 
-    // Clear lock
-    await prisma.spinState.update({
-      where: { id: 'global' },
-      data: {
-        status: 'IDLE',
-        userId: null,
-        username: null,
-        wager: null,
-        segments: [],
-        resultIndex: null,
-        spinStartAt: null,
-        durationMs: null,
+    return NextResponse.json(
+      {
+        balance: result.balance,
+        log: result.log, // <-- new row for instant UI insert
+        popup: isCoins ? null : { title: 'Tabriklaymiz!', text: prizeName },
       },
-    });
-
-    return NextResponse.json({ ok: true, prize: prizeText });
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
   } catch (e) {
-    console.error('complete POST error', e);
-    return NextResponse.json({ error: 'server_error' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'server' },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } }
+    );
   }
 }
