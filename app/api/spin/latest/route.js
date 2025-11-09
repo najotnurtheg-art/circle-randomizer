@@ -5,18 +5,17 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/prisma';
 
 export async function GET() {
-  const rows = await prisma.spinLog.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: 5,
-    select: { id: true, prize: true, createdAt: true, username: true }
-  });
+  try {
+    const logs = await prisma.spinLog.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
 
-  const out = rows.map(r => ({
-    id: r.id,
-    prize: r.prize,
-    when: r.createdAt,
-    displayName: r.username || 'Player'
-  }));
-
-  return NextResponse.json(out, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json(logs, { headers: { 'Cache-Control': 'no-store' } });
+  } catch {
+    return NextResponse.json(
+      { error: 'server' },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } }
+    );
+  }
 }
