@@ -1,534 +1,358 @@
-// app/wheel/page.js
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from 'react';
 
-const WAGERS = [50, 100, 200];
+const TOP_ANGLE = -Math.PI / 2;
+const label = (seg) =>
+  seg?.type === 'item' ? seg.name : seg?.type === 'coins' ? `+${seg.amount} coins` : 'Another spin';
 
 export default function WheelPage() {
-  const [me, setMe] = useState(null);
+  const canvasRef = useRef(null);
+  const rafRef = useRef(null);
+
+  const [angle, setAngle] = useState(0);
+  const [spinning, setSpinning] = useState(false);
+  const [wager, setWager] = useState(50);
+  const [balance, setBalance] = useState(0);
   const [segments, setSegments] = useState([]);
-  const [wager, setWager] = useState(100);
-  const [rotation, setRotation] = useState(0);
-  const [isSpinning, setIsSpinning] = useState(false);
-  const [spinState, setSpinState] = useState(null);
-  const [winner, setWinner] = useState(null);
-  const [error, setError] = useState(null);
-  const [wins, setWins] = useState([]);
+  const [err, setErr] = useState('');
+  const [state, setState] = useState({
+    status: 'IDLE',
+    userId: null,
+    username: null,
+    resultIndex: null,
+    segments: [],
+    spinStartAt: null,
+    durationMs: null,
+  });
+  const [me, setMe] = useState(null);
+
+  const [popup, setPopup] = useState(null);
+  const [popupCountdown, setPopupCountdown] = useState(0);
+
+  const [showList, setShowList] = useState(false);
+  const [allItems, setAllItems] = useState([]);
+  const [featuredUsers, setFeaturedUsers] = useState([]);
+  const [latestWins, setLatestWins] = useState([]);
   const [storeItems, setStoreItems] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  const anglePerSegment = useMemo(
-    () => (segments.length ? 360 / segments.length : 0),
-    [segments.length]
-  );
+  const currentSpinKey = useRef(null);
 
-  const currentSpinnerText = useMemo(() => {
-    if (!spinState) return "";
-    if (spinState.status !== "SPINNING" || !spinState.username) return "";
-    return `${spinState.username} aylantiryapti...`;
-  }, [spinState]);
+  // draw
+  const draw = (a, segs) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const size = 360;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    canvas.style.width = size + 'px';
+    canvas.style.height = size + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, size, size);
+    const s = segs.length ? segs : [{ type: 'item', name: 'Admin items kerak' }];
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = size / 2 - 8;
+    const n = s.length;
+    const step = (2 * Math.PI) / n;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(a);
+    for (let i = 0; i < n; i++) {
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.fillStyle = i % 2 ? '#e2e8f0' : '#f8fafc';
+      ctx.arc(0, 0, r, i * step, (i + 1) * step);
+      ctx.closePath();
+      ctx.fill();
+      ctx.save();
+      ctx.rotate((i + 0.5) * step);
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 14px system-ui';
+      ctx.fillStyle = '#111827';
+      ctx.fillText(label(s[i]), r * 0.65, 6);
+      ctx.restore();
+    }
+    ctx.restore();
+    // pointer
+    ctx.beginPath();
+    ctx.moveTo(cx, 8);
+    ctx.lineTo(cx - 12, 28);
+    ctx.lineTo(cx + 12, 28);
+    ctx.closePath();
+    ctx.fillStyle = '#ef4444';
+    ctx.fill();
+  };
+  useEffect(() => { draw(angle, segments); }, [angle, segments]);
 
-  function computeTargetRotation(resultIndex, durationMs) {
-    if (!segments.length) return rotation;
-    const baseTurns = 5; // 5 full turns before stop
-    const finalAngle =
-      360 * baseTurns + (360 - resultIndex * anglePerSegment) - anglePerSegment / 2;
-    return finalAngle;
-  }
-
-  async function fetchMe() {
-    const res = await fetch("/api/me", { cache: "no-store" });
-    if (!res.ok) throw new Error("me_failed");
-    const data = await res.json();
-    const u = data.user || data;
-    const newMe = {
-      id: u.id,
-      login: u.login,
-      name: u.name,
-      role: u.role,
-      balance: u.balance || 0,
-    };
-    setMe(newMe);
-    return newMe;
-  }
-
-  async function fetchSegmentsFn(w) {
-    const res = await fetch(`/api/segments?wager=${w}`, { cache: "no-store" });
-    if (!res.ok) throw new Error("segments_failed");
-    const data = await res.json();
-    setSegments(data.segments || data);
-  }
-
-  async function fetchSpinState() {
+  // helpers
+  const getMe = async () => {
+    const r = await fetch('/api/me', { cache: 'no-store' });
+    if (!r.ok) { setMe(null); return false; }
+    const j = await r.json();
+    setMe(j); setBalance(j.balance || 0);
+    return true;
+  };
+  const getSegments = async (w) => {
     try {
-      const res = await fetch("/api/spin/state", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      setSpinState(data);
-
-      if (data && data.status === "SPINNING" && data.resultIndex != null) {
-        const now = Date.now();
-        const start = data.spinStartAt ? new Date(data.spinStartAt).getTime() : now;
-        const duration = data.durationMs || 10000;
-        const elapsed = Math.min(Math.max(now - start, 0), duration);
-        const progress = elapsed / duration;
-
-        const target = computeTargetRotation(data.resultIndex, duration);
-        const currentAngle = target * progress;
-        setRotation(currentAngle);
+      const r = await fetch(`/api/segments?tier=${w}`, { cache: 'no-store' });
+      if (r.ok) {
+        const j = await r.json();
+        if (j.segments) setSegments(j.segments);
       }
-    } catch (e) {
-      console.error(e);
-    }
-  }
+    } catch {}
+  };
+  const getAllItems = async () => { try { const r = await fetch('/api/items/all', { cache: 'no-store' }); if (r.ok) setAllItems(await r.json()); } catch {} };
+  const getFeatured = async () => { try { const r = await fetch('/api/users/featured', { cache: 'no-store' }); if (r.ok) setFeaturedUsers(await r.json()); } catch {} };
+  const getLatestWins = async () => { try { const r = await fetch('/api/spin/latest', { cache: 'no-store' }); if (r.ok) setLatestWins(await r.json()); } catch {} };
+  const getStore = async () => { try { const r = await fetch('/api/store/list', { cache: 'no-store' }); if (r.ok) setStoreItems(await r.json()); } catch {} };
 
-  async function fetchRecentWins() {
+  // animate shared
+  const startSharedSpin = (spin) => {
+    if (!spin || !spin.segments?.length || typeof spin.resultIndex !== 'number' || !spin.spinStartAt) return;
+    const key = `${spin.userId}-${spin.resultIndex}-${spin.spinStartAt}`;
+    if (currentSpinKey.current === key) return;
+    currentSpinKey.current = key;
+
+    setSegments(spin.segments);
+    const n = spin.segments.length;
+    const step = (2 * Math.PI) / n;
+    const target = TOP_ANGLE - (spin.resultIndex * step + step / 2);
+    const turns = 6;
+    const final = target + turns * 2 * Math.PI;
+    const duration = Number(spin.durationMs || 10000);
+    const startAtMs = new Date(spin.spinStartAt).getTime();
+
+    const startAngle = angle % (2 * Math.PI);
+    const perfOffset = Math.max(0, Date.now() - startAtMs);
+    const startPerf = performance.now() - perfOffset;
+
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    const run = (t) => {
+      const elapsed = t - startPerf;
+      const e = Math.min(1, elapsed / duration);
+      const ease = 1 - Math.pow(1 - e, 3);
+      setAngle(startAngle + (final - startAngle) * ease);
+      if (e < 1) {
+        rafRef.current = requestAnimationFrame(run);
+      } else {
+        rafRef.current = null;
+        const seg = spin.segments[spin.resultIndex];
+        if (seg?.type === 'item') setPopup({ text: `'${spin.username}' siz '${seg.name}' yutib oldingiz🎉`, imageUrl: seg.imageUrl || null });
+        else if (seg?.type === 'coins') setPopup({ text: `'${spin.username}' siz +${seg.amount} tangalarni yutib oldingiz🎉`, imageUrl: null });
+        else setPopup({ text: `'${spin.username}' uchun yana bir aylantirish!`, imageUrl: null });
+        completeSpin(); // tell server to award and unlock
+      }
+    };
+    rafRef.current = requestAnimationFrame(run);
+  };
+
+  const pollState = async () => {
     try {
-      const res = await fetch("/api/recent-wins", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      setWins(data.wins || data);
-    } catch (e) {
-      console.error(e);
-    }
-  }
+      const r = await fetch('/api/spin/state', { cache: 'no-store' });
+      if (!r.ok) return;
+      const j = await r.json();
+      setState(j);
+      if (j.status === 'SPINNING') startSharedSpin(j);
+    } catch {}
+  };
 
-  async function fetchStore() {
-    try {
-      const res = await fetch("/api/store", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      setStoreItems(data.items || data);
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  async function fetchUsers() {
-    try {
-      const res = await fetch("/api/users", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      setUsers(data.users || data);
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  // initial load + polling
   useEffect(() => {
-    let intervalId;
-
     (async () => {
-      try {
-        await fetchMe();
-        await fetchSegmentsFn(wager);
-        await fetchSpinState();
-        await fetchRecentWins();
-        await fetchStore();
-        await fetchUsers();
-      } catch (e) {
-        console.error(e);
-        setError("Xatolik. Iltimos, sahifani yangilang.");
-      } finally {
-        setLoading(false);
-      }
+      await getMe();
+      await getSegments(wager);
+      await getFeatured();
+      await getLatestWins();
+      await getStore();
+      await pollState();
+      const id1 = setInterval(pollState, 1000);
+      const id2 = setInterval(getFeatured, 3000);
+      const id3 = setInterval(getLatestWins, 4000);
+      const id4 = setInterval(getStore, 6000);
+      return () => { clearInterval(id1); clearInterval(id2); clearInterval(id3); clearInterval(id4); if (rafRef.current) cancelAnimationFrame(rafRef.current); };
     })();
-
-    intervalId = setInterval(() => {
-      fetchSpinState();
-      fetchRecentWins();
-      fetchUsers();
-    }, 5000);
-
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleChangeWager(newWager) {
-    if (isSpinning) return;
-    setWager(newWager);
-    await fetchSegmentsFn(newWager);
-    setRotation(0);
-  }
+  // auto-close popup
+  useEffect(() => {
+    if (!popup) return;
+    setPopupCountdown(10);
+    const tick = setInterval(() => {
+      setPopupCountdown((s) => { if (s <= 1) { clearInterval(tick); setPopup(null); return 0; } return s - 1; });
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [popup]);
 
-  async function handleSpin() {
+  const changeWager = (w) => { setWager(w); getSegments(w); };
+
+  const spin = async () => {
+    setErr(''); setPopup(null);
+    const authed = await getMe();
+    if (!authed) { setErr('Iltimos, /login orqali kiring'); return; }
+    if (state.status === 'SPINNING' && state.userId && state.userId !== me?.id) { setErr(`Band: hozir ${state.username} aylanmoqda`); return; }
+    setSpinning(true);
+    const r = await fetch('/api/spin', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ wager }) });
+    const j = await r.json();
+    if (!r.ok) { setErr(j.error||'xato'); setSpinning(false); return; }
+    startSharedSpin(j);
+    await getMe(); // balance decreased
+    setSpinning(false);
+  };
+
+  const completeSpin = async () => {
     try {
-      setError(null);
-
-      if (!me) {
-        setError("Avval tizimga kiring.");
-        return;
+      const r = await fetch('/api/spin/complete', { method: 'POST' });
+      if (r.ok) {
+        await getMe();
+        await getLatestWins();
+        await pollState();
       }
-      if (isSpinning) return;
-      if (me.balance < wager) {
-        setError("Balansingiz yetarli emas.");
-        return;
-      }
-
-      setIsSpinning(true);
-
-      // IMPORTANT: this matches your original repo (POST /api/spin)
-      const res = await fetch("/api/spin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wager }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        setIsSpinning(false);
-        setError((data && data.error) || "SERVER_ERROR");
-        await fetchSpinState();
-        return;
-      }
-
-      const data = await res.json();
-      setSpinState(data);
-
-      if (data.resultIndex == null) {
-        setIsSpinning(false);
-        await fetchSpinState();
-        return;
-      }
-
-      const duration = data.durationMs || 10000;
-      const target = computeTargetRotation(data.resultIndex, duration);
-
-      requestAnimationFrame(() => {
-        setRotation(target);
-      });
-
-      setTimeout(async () => {
-        try {
-          const res2 = await fetch("/api/spin/complete", {
-            method: "POST",
-          });
-          const result = await res2.json().catch(() => null);
-
-          if (res2.ok && result && result.prize) {
-            setWinner(result.prize);
-          } else if (!res2.ok) {
-            setError((result && result.error) || "SERVER_ERROR");
-          }
-        } catch (e) {
-          console.error(e);
-          setError("SERVER_ERROR");
-        } finally {
-          setIsSpinning(false);
-          const updated = await fetchMe();
-          setMe(updated);
-          await fetchSpinState();
-          await fetchRecentWins(); // refresh rewards immediately after spin
-        }
-      }, (data.durationMs || 10000) + 200);
-    } catch (e) {
-      console.error(e);
-      setError("SERVER_ERROR");
-      setIsSpinning(false);
-    }
-  }
-
-  async function handleBuy(storeItemId, price) {
-    try {
-      setError(null);
-      if (!me) {
-        setError("Avval tizimga kiring.");
-        return;
-      }
-      if (me.balance < price) {
-        setError("Balansingiz yetarli emas.");
-        return;
-      }
-
-      const res = await fetch("/api/store/buy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storeItemId }),
-      });
-
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok || !data || !data.ok) {
-        setError((data && data.error) || "SERVER_ERROR");
-        return;
-      }
-
-      const newBalance = Number(data.newBalance || 0);
-      setMe((prev) =>
-        prev ? { ...prev, balance: newBalance } : prev
-      );
-
-      // refresh rewards so store purchase appears if logged there
-      await fetchRecentWins();
-    } catch (e) {
-      console.error(e);
-      setError("SERVER_ERROR");
-    }
-  }
-
-  const isLocked =
-    spinState && spinState.status === "SPINNING" && spinState.isLocked;
-
-  const spinDisabled =
-    isSpinning || isLocked || !me || (me && me.balance < wager);
+    } catch {}
+  };
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center py-8">
-      <div className="flex w-full max-w-6xl gap-6 px-4">
-        {/* LEFT: users */}
-        <div className="w-60">
-          <h2 className="text-xl font-semibold mb-2">Foydalanuvchilar</h2>
-          {users.length === 0 ? (
-            <p className="text-sm text-gray-400">
-              Hozircha foydalanuvchilar yo&apos;q.
-            </p>
-          ) : (
-            <ul className="space-y-1 text-sm">
-              {users.map((u) => (
-                <li
-                  key={u.id}
-                  className="flex justify-between border-b border-gray-800 py-1"
-                >
-                  <span>{u.name || u.login}</span>
-                  <span className="text-emerald-400">{u.balance}</span>
-                </li>
-              ))}
+    <div style={{ padding: '24px', paddingTop: 74, fontFamily:'system-ui, sans-serif', color:'#e5e7eb', background:'#111', minHeight:'100vh' }}>
+      <style>{`
+        .wrap { display:grid; grid-template-columns: 260px 1fr 260px; gap:20px; align-items:start; }
+        @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } .side { order: 3; } .side-right { order: 4; } .center { order: 2; } }
+        .card { background:#1f2937; border:1px solid #374151; border-radius:12px; padding:12px; }
+        .title { font-weight:700; margin-bottom:8px; color:#fff; }
+        .pill { padding:8px 12px; border-radius:8px; border:1px solid #374151; background:#0b0b0b; color:#fff; }
+        .btn { padding:10px 16px; border-radius:12px; background:#000; color:#fff; border:1px solid #374151; }
+        a { color:#93c5fd; }
+      `}</style>
+
+      <div className="wrap">
+        {/* LEFT */}
+        <div className="side">
+          <div className="card" style={{marginBottom:16}}>
+            <div className="title">Qoidalar (tanga olish)</div>
+            <ul style={{margin:0, paddingLeft:16, lineHeight:1.6}}>
+              <li>Onlayn <b>300.000 so‘m</b> = <b>10 tanga</b></li>
+              <li>Oflayn <b>1.000.000 so‘m</b> = <b>10 tanga</b></li>
             </ul>
-          )}
+            <div style={{fontSize:12, opacity:.8, marginTop:6}}>Admin bu ro‘yxatni kerak bo‘lsa keyin kengaytirishi mumkin.</div>
+          </div>
+
+          <div className="card">
+            <div className="title">Oxirgi 5 yutuq</div>
+            {latestWins.length === 0 ? (
+              <div style={{opacity:.8}}>Hali yutuqlar ro‘yxati yo‘q.</div>
+            ) : (
+              <ul style={{margin:0, paddingLeft:0, listStyle:'none', lineHeight:1.6}}>
+                {latestWins.map(w => (
+                  <li key={w.id} style={{display:'flex', justifyContent:'space-between', gap:8, padding:'6px 0', borderBottom:'1px dashed #374151'}}>
+                    <span style={{maxWidth:'60%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{w.displayName}</span>
+                    <span title={new Date(w.when).toLocaleString()} style={{opacity:.8, fontSize:12}}>{new Date(w.when).toLocaleTimeString()}</span>
+                    <b style={{maxWidth:'35%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{w.prize}</b>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div style={{fontSize:12, opacity:.8, marginTop:6}}>Ro‘yxat har 4 soniyada yangilanadi.</div>
+          </div>
         </div>
 
-        {/* CENTER: wheel */}
-        <div className="flex-1 flex flex-col items-center gap-4">
-          {/* wager buttons */}
-          <div className="flex gap-2 mb-2">
-            {WAGERS.map((w) => (
-              <button
-                key={w}
-                onClick={() => handleChangeWager(w)}
-                disabled={isSpinning || isLocked}
-                className={`px-5 py-2 rounded-md text-sm font-semibold border border-gray-700 ${
-                  wager === w
-                    ? "bg-emerald-500 text-black"
-                    : "bg-gray-900 hover:bg-gray-800"
-                }`}
-              >
-                {w}
-              </button>
-            ))}
+        {/* CENTER */}
+        <div className="center" style={{display:'flex', flexDirection:'column', alignItems:'center', gap:12}}>
+          <div style={{display:'flex', gap:8, marginTop:4}}>
+            <button onClick={()=> (setWager(50), getSegments(50))}  disabled={spinning} className="pill" style={{background:wager===50?'#2563eb':'#0b0b0b'}}>50 tanga</button>
+            <button onClick={()=> (setWager(100), getSegments(100))} disabled={spinning} className="pill" style={{background:wager===100?'#2563eb':'#0b0b0b'}}>100 tanga</button>
+            <button onClick={()=> (setWager(200), getSegments(200))} disabled={spinning} className="pill" style={{background:wager===200?'#2563eb':'#0b0b0b'}}>200 tanga</button>
           </div>
 
-          {/* current spinner */}
-          <div className="h-6 text-sm text-amber-300 font-semibold">
-            {currentSpinnerText}
+          <div style={{marginTop:4, color:'#cbd5e1'}}>
+            {state.status === 'SPINNING' ? <b>Hozir: {state.username} aylanmoqda</b> : <span>Keyingi o‘yinchi tayyor!</span>}
           </div>
 
-          {/* pointer */}
-          <div className="w-0 h-0 border-l-[14px] border-r-[14px] border-b-[20px] border-l-transparent border-r-transparent border-b-amber-400 mb-[-10px]" />
+          <canvas ref={canvasRef} style={{ borderRadius:'9999px', boxShadow:'0 10px 30px rgba(0,0,0,0.35)', background:'#fff' }} />
 
-          {/* wheel */}
-          <div className="relative w-[340px] h-[340px] md:w-[420px] md:h-[420px]">
-            <div
-              className="absolute inset-0 rounded-full border-[10px] border-gray-800 shadow-[0_0_40px_rgba(0,0,0,0.8)] overflow-hidden"
-              style={{
-                transform: `rotate(${rotation}deg)`,
-                transition: isSpinning
-                  ? "transform 10s cubic-bezier(0.2, 0.9, 0.1, 1)"
-                  : undefined,
-              }}
-            >
-              {segments.map((seg, idx) => {
-                const startAngle = idx * anglePerSegment;
-                const endAngle = startAngle + anglePerSegment;
-                const largeArc = anglePerSegment > 180 ? 1 : 0;
-                const radius = 200;
+          <div>Balans: <b>{balance}</b> tanga</div>
 
-                const x1 =
-                  radius +
-                  radius * Math.cos((Math.PI * startAngle) / 180);
-                const y1 =
-                  radius +
-                  radius * Math.sin((Math.PI * startAngle) / 180);
-                const x2 =
-                  radius +
-                  radius * Math.cos((Math.PI * endAngle) / 180);
-                const y2 =
-                  radius +
-                  radius * Math.sin((Math.PI * endAngle) / 180);
+          <button onClick={spin} disabled={spinning || (state.status==='SPINNING' && state.userId && state.userId !== me?.id)} className="btn">
+            {spinning ? 'Aylanyapti…' : `Spin (-${wager})`}
+          </button>
 
-                const d = `M ${radius} ${radius} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`;
-
-                const colors = [
-                  "#06b6d4",
-                  "#f59e0b",
-                  "#22c55e",
-                  "#60a5fa",
-                  "#f472b6",
-                  "#a78bfa",
-                  "#fb7185",
-                  "#34d399",
-                ];
-                const fill = colors[idx % colors.length];
-
-                const textAngle = startAngle + anglePerSegment / 2;
-
-                return (
-                  <svg
-                    key={idx}
-                    viewBox="0 0 400 400"
-                    className="absolute inset-0"
-                  >
-                    <path d={d} fill={fill} stroke="#111827" />
-                    <text
-                      x="200"
-                      y="200"
-                      fill="#fff"
-                      fontSize="16"
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      transform={`rotate(${textAngle},200,200) translate(0,-120) rotate(90,200,200)`}
-                    >
-                      {seg.label}
-                    </text>
-                  </svg>
-                );
-              })}
-              {/* center circle */}
-              <div className="absolute inset-[34%] rounded-full bg-black flex items-center justify-center text-sm font-semibold">
-                Super Aylana
-              </div>
-            </div>
-          </div>
-
-          {/* balance + spin */}
-          <div className="flex items-center gap-4 mt-4">
-            <div className="px-4 py-2 rounded-md bg-gray-900 text-sm">
-              Balance:{" "}
-              <span className="font-semibold text-emerald-400">
-                {me && me.balance != null ? me.balance : 0}
-              </span>
-            </div>
-            <button
-              onClick={handleSpin}
-              disabled={spinDisabled}
-              className={`px-8 py-2 rounded-md text-sm font-semibold ${
-                spinDisabled
-                  ? "bg-gray-700 text-gray-400 cursor-not-allowed"
-                  : "bg-emerald-500 hover:bg-emerald-400 text-black"
-              }`}
-            >
-              {isSpinning || isLocked
-                ? "Aylanmoqda..."
-                : `Aylantirish (${wager})`}
+          {/* items dropdown */}
+          <div style={{marginTop:8, width:360, maxWidth:'100%'}}>
+            <button onClick={()=>{ setShowList(!showList); if(!allItems.length) getAllItems(); }} className="pill" style={{width:'100%'}}>
+              Barcha sovg‘alar (narxlari bilan) {showList ? '▲' : '▼'}
             </button>
-          </div>
-
-          {/* store under wheel */}
-          {storeItems.length > 0 && (
-            <div className="mt-8 w-full">
-              <h3 className="text-lg font-semibold mb-2">Do&apos;kon</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                {storeItems
-                  .filter((i) => i.active)
-                  .map((item) => (
-                    <div
-                      key={item.id}
-                      className="border border-gray-800 rounded-lg p-3 flex flex-col gap-2 bg-gray-950"
-                    >
-                      <div className="font-semibold">{item.name}</div>
-                      <div className="text-emerald-400">
-                        {item.price} coin
-                      </div>
-                      {item.imageUrl && (
-                        <img
-                          src={item.imageUrl}
-                          alt={item.name}
-                          className="w-full h-24 object-cover rounded-md"
-                        />
-                      )}
-                      <button
-                        onClick={() =>
-                          handleBuy(item.id, item.price)
-                        }
-                        className="mt-auto px-3 py-1 rounded-md bg-emerald-500 hover:bg-emerald-400 text-black font-semibold"
-                      >
-                        Sotib olish
-                      </button>
-                    </div>
-                  ))}
+            {showList && (
+              <div className="card" style={{marginTop:6, maxHeight:260, overflow:'auto'}}>
+                {[50,100,200,500].map(tier => (
+                  <div key={tier} style={{marginBottom:8}}>
+                    <div className="title" style={{marginBottom:4, fontSize:14}}>{tier} tanga</div>
+                    <ul style={{margin:0, paddingLeft:18}}>
+                      {allItems
+                        .filter(i => i.tier === (tier===50?'T50':tier===100?'T100':tier===200?'T200':'T500'))
+                        .map(i => (<li key={i.id} style={{color:'#e5e7eb'}}>{i.name}{i.imageUrl ? ' 🖼️' : ''}</li>))}
+                    </ul>
+                  </div>
+                ))}
               </div>
-            </div>
-          )}
-
-          {/* logged in info */}
-          <div className="mt-4 text-xs text-gray-400">
-            {me
-              ? `Logged in as: ${me.name || me.login} (login: ${
-                  me.login
-                })`
-              : "Tizimga kirmagansiz"}
+            )}
           </div>
 
-          {error && (
-            <div className="mt-2 text-sm text-red-400">{error}</div>
-          )}
+          {err && <div style={{color:'#fca5a5'}}>{err}</div>}
         </div>
 
-        {/* RIGHT: recent wins */}
-        <div className="w-72">
-          <h2 className="text-xl font-semibold mb-2">
-            So&apos;nggi yutuqlar
-          </h2>
-          {wins.length === 0 ? (
-            <p className="text-sm text-gray-400">
-              Hozircha yutuqlar yo&apos;q.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {wins.map((w) => (
-                <div
-                  key={w.id}
-                  className="bg-gray-900 rounded-lg px-3 py-2 text-sm"
-                >
-                  <div className="font-semibold text-emerald-400">
-                    {w.username}
-                  </div>
-                  <div className="text-gray-100">{w.prize}</div>
-                  <div className="text-[11px] text-gray-400 mt-1">
-                    {new Date(w.createdAt).toLocaleTimeString()} —{" "}
-                    {w.wager} coin
-                  </div>
-                </div>
-              ))}
+        {/* RIGHT */}
+        <div className="side side-right">
+          <div className="card" style={{marginBottom:16}}>
+            <div className="title">Ishtirokchilar balansi</div>
+            {featuredUsers.length === 0 ? (
+              <div style={{opacity:.8}}>Hozircha ro‘yxat bo‘sh. Admin “Users” sahifasida belgilaydi.</div>
+            ) : (
+              <ul style={{margin:0, paddingLeft:0, listStyle:'none', lineHeight:1.6}}>
+                {featuredUsers.map(u=>(
+                  <li key={u.id} style={{display:'flex', justifyContent:'space-between', gap:8, padding:'4px 0', borderBottom:'1px dashed #374151'}}>
+                    <span>{u.displayName}</span>
+                    <b>{u.balance}</b>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div style={{fontSize:12, opacity:.8, marginTop:6}}>Ro‘yxat har 3 soniyada yangilanadi.</div>
+          </div>
+
+          {/* Store */}
+          <div className="card">
+            <div className="title">Do‘kon (spin’siz xarid)</div>
+            {storeItems.length === 0 ? (
+              <div style={{opacity:.8}}>Hozircha sotib olishga ruxsat etilgan mahsulotlar yo‘q.</div>
+            ) : (
+              <ul style={{margin:0, paddingLeft:0, listStyle:'none', display:'grid', gap:8}}>
+                {storeItems.map(it=>(
+                  <li key={it.id} style={{display:'flex', alignItems:'center', gap:10}}>
+                    {it.imageUrl && <img src={it.imageUrl} alt="" style={{width:36, height:36, objectFit:'cover', borderRadius:6}}/>}
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:600}}>{it.name}</div>
+                      <div style={{fontSize:12, opacity:.8}}>{it.price} tanga</div>
+                    </div>
+                    <button className="pill" style={{whiteSpace:'nowrap'}}>Sotib olish</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div style={{fontSize:12, opacity:.8, marginTop:6, borderTop:'1px dashed #374151', paddingTop:6}}>
+              Store items ko‘rsatilmoqda: <b>{storeItems.length}</b> ta.
             </div>
-          )}
+          </div>
         </div>
       </div>
 
-      {/* winner popup */}
-      {winner && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-gray-900 rounded-2xl px-8 py-6 max-w-md text-center shadow-xl">
-            <div className="text-lg mb-3">
-              <span className="font-semibold">
-                {me ? me.name || me.login : ""}
-              </span>{" "}
-              siz{" "}
-              <span className="font-semibold text-emerald-400">
-                {winner}
-              </span>{" "}
-              yutib oldingiz!
-            </div>
-            <button
-              onClick={() => setWinner(null)}
-              className="mt-2 px-5 py-2 rounded-md bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm"
-            >
-              Yopish
-            </button>
+      {/* POPUP */}
+      {popup && (
+        <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:50}} onClick={()=>setPopup(null)}>
+          <div style={{background:'white', padding:20, borderRadius:12, maxWidth:320, textAlign:'center'}} onClick={(e)=>e.stopPropagation()}>
+            {popup.imageUrl && <img src={popup.imageUrl} alt="prize" style={{width:'100%', borderRadius:8, marginBottom:12}}/>}
+            <div style={{fontWeight:700, marginBottom:8, color:'#111'}}>{popup.text}</div>
+            <div style={{fontSize:12, color:'#444', marginBottom:10}}>{popupCountdown > 0 ? `(yopiladi: ${popupCountdown}s)` : ''}</div>
+            <button onClick={()=>setPopup(null)} style={{padding:'8px 12px', borderRadius:8, background:'black', color:'white'}}>OK</button>
           </div>
         </div>
       )}
