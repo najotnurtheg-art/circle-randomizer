@@ -1,4 +1,4 @@
-// app/api/store/buy/route.ts
+// app/api/store/buy/route.js
 import { NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
 import { requireUser } from "@/app/lib/auth";
@@ -10,12 +10,12 @@ import { requireUser } from "@/app/lib/auth";
  * Decreases user's balance, logs the purchase in SpinLog
  * and returns new balance.
  */
-export async function POST(req: Request) {
+export async function POST(req) {
   try {
     const me = await requireUser(); // throws if not logged in
 
     const body = await req.json().catch(() => null);
-    const storeItemId = body?.storeItemId as string | undefined;
+    const storeItemId = body && body.storeItemId;
 
     if (!storeItemId) {
       return NextResponse.json(
@@ -60,7 +60,7 @@ export async function POST(req: Request) {
       },
     });
 
-    // Optional: log store purchase in SpinLog so it appears in rewards
+    // Log store purchase into SpinLog so it appears in rewards
     await prisma.spinLog.create({
       data: {
         userId: updatedUser.id,
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
         imageUrl: item.imageUrl,
       },
     });
-  } catch (e: any) {
+  } catch (e) {
     console.error("STORE_BUY_ERROR", e);
     return NextResponse.json(
       { error: "SERVER_ERROR" },
