@@ -1,74 +1,28 @@
-// app/wheel/page.tsx
+// app/wheel/page.js
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 
-type Me = {
-  id: string;
-  login: string;
-  name: string;
-  role: "USER" | "ADMIN";
-  balance: number;
-};
-
-type Segment = {
-  type: "item" | "coins" | "respin";
-  label: string;
-  itemId?: string;
-  amount?: number;
-};
-
-type SpinState = {
-  status: "IDLE" | "SPINNING";
-  username: string | null;
-  wager: number | null;
-  segments: Segment[];
-  resultIndex: number | null;
-  spinStartAt: string | null;
-  durationMs: number | null;
-  isLocked: boolean;
-};
-
-type WinLog = {
-  id: string;
-  username: string;
-  prize: string;
-  wager: number;
-  createdAt: string;
-};
-
-type StoreItem = {
-  id: string;
-  name: string;
-  price: number;
-  imageUrl: string | null;
-  active: boolean;
-};
-
-type UserRow = {
-  id: string;
-  name: string | null;
-  login: string;
-  balance: number;
-};
-
-const WAGERS = [50, 100, 200] as const;
+const WAGERS = [50, 100, 200];
 
 export default function WheelPage() {
-  const [me, setMe] = useState<Me | null>(null);
-  const [segments, setSegments] = useState<Segment[]>([]);
-  const [wager, setWager] = useState<number>(100);
+  const [me, setMe] = useState(null);
+  const [segments, setSegments] = useState([]);
+  const [wager, setWager] = useState(100);
   const [rotation, setRotation] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
-  const [spinState, setSpinState] = useState<SpinState | null>(null);
-  const [winner, setWinner] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [wins, setWins] = useState<WinLog[]>([]);
-  const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
-  const [users, setUsers] = useState<UserRow[]>([]);
+  const [spinState, setSpinState] = useState(null);
+  const [winner, setWinner] = useState(null);
+  const [error, setError] = useState(null);
+  const [wins, setWins] = useState([]);
+  const [storeItems, setStoreItems] = useState([]);
+  const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // ---------- helpers ----------
+  const anglePerSegment = useMemo(
+    () => (segments.length ? 360 / segments.length : 0),
+    [segments.length]
+  );
 
   const currentSpinnerText = useMemo(() => {
     if (!spinState) return "";
@@ -76,12 +30,7 @@ export default function WheelPage() {
     return `${spinState.username} aylantiryapti...`;
   }, [spinState]);
 
-  const anglePerSegment = useMemo(
-    () => (segments.length ? 360 / segments.length : 0),
-    [segments.length]
-  );
-
-  function computeTargetRotation(resultIndex: number, durationMs: number) {
+  function computeTargetRotation(resultIndex, durationMs) {
     if (!segments.length) return rotation;
     const baseTurns = 5; // 5 full turns before stop
     const finalAngle =
@@ -93,43 +42,45 @@ export default function WheelPage() {
     const res = await fetch("/api/me", { cache: "no-store" });
     if (!res.ok) throw new Error("me_failed");
     const data = await res.json();
-    const u = data.user ?? data;
-    const newMe: Me = {
+    const u = data.user || data;
+    const newMe = {
       id: u.id,
       login: u.login,
       name: u.name,
       role: u.role,
-      balance: u.balance ?? 0,
+      balance: u.balance || 0,
     };
     setMe(newMe);
     return newMe;
   }
 
-  async function fetchSegments(w: number) {
+  async function fetchSegmentsFn(w) {
     const res = await fetch(`/api/segments?wager=${w}`, { cache: "no-store" });
     if (!res.ok) throw new Error("segments_failed");
     const data = await res.json();
-    setSegments(data.segments ?? data);
+    setSegments(data.segments || data);
   }
 
   async function fetchSpinState() {
-    const res = await fetch("/api/spin/state", { cache: "no-store" });
-    if (!res.ok) return;
-    const data = await res.json();
-    setSpinState(data);
+    try {
+      const res = await fetch("/api/spin/state", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setSpinState(data);
 
-    if (data?.status === "SPINNING" && data.resultIndex != null) {
-      const now = Date.now();
-      const start = data.spinStartAt ? new Date(data.spinStartAt).getTime() : now;
-      const duration = data.durationMs ?? 10000;
-      const elapsed = Math.min(Math.max(now - start, 0), duration);
-      const progress = elapsed / duration;
+      if (data && data.status === "SPINNING" && data.resultIndex != null) {
+        const now = Date.now();
+        const start = data.spinStartAt ? new Date(data.spinStartAt).getTime() : now;
+        const duration = data.durationMs || 10000;
+        const elapsed = Math.min(Math.max(now - start, 0), duration);
+        const progress = elapsed / duration;
 
-      // We don't animate here, just set approximate rotation so
-      // observers see a consistent position.
-      const target = computeTargetRotation(data.resultIndex, duration);
-      const currentAngle = target * progress;
-      setRotation(currentAngle);
+        const target = computeTargetRotation(data.resultIndex, duration);
+        const currentAngle = target * progress;
+        setRotation(currentAngle);
+      }
+    } catch (e) {
+      console.error(e);
     }
   }
 
@@ -138,9 +89,9 @@ export default function WheelPage() {
       const res = await fetch("/api/recent-wins", { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
-      setWins(data.wins ?? data);
-    } catch {
-      // ignore
+      setWins(data.wins || data);
+    } catch (e) {
+      console.error(e);
     }
   }
 
@@ -149,9 +100,9 @@ export default function WheelPage() {
       const res = await fetch("/api/store", { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
-      setStoreItems(data.items ?? data);
-    } catch {
-      // ignore
+      setStoreItems(data.items || data);
+    } catch (e) {
+      console.error(e);
     }
   }
 
@@ -160,26 +111,25 @@ export default function WheelPage() {
       const res = await fetch("/api/users", { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
-      setUsers(data.users ?? data);
-    } catch {
-      // ignore
+      setUsers(data.users || data);
+    } catch (e) {
+      console.error(e);
     }
   }
 
-  // ---------- initial load & polling ----------
-
+  // initial load + polling
   useEffect(() => {
-    let intervalId: NodeJS.Timeout;
+    let intervalId;
 
     (async () => {
       try {
         await fetchMe();
-        await fetchSegments(wager);
+        await fetchSegmentsFn(wager);
         await fetchSpinState();
         await fetchRecentWins();
         await fetchStore();
         await fetchUsers();
-      } catch (e: any) {
+      } catch (e) {
         console.error(e);
         setError("Xatolik. Iltimos, sahifani yangilang.");
       } finally {
@@ -187,24 +137,22 @@ export default function WheelPage() {
       }
     })();
 
-    // Poll spin state + wins + users every 5s
     intervalId = setInterval(() => {
       fetchSpinState();
       fetchRecentWins();
       fetchUsers();
     }, 5000);
 
-    return () => clearInterval(intervalId);
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------- actions ----------
-
-  async function handleChangeWager(newWager: number) {
+  async function handleChangeWager(newWager) {
     if (isSpinning) return;
     setWager(newWager);
-    await fetchSegments(newWager);
-    // reset rotation so pointer / slice match
+    await fetchSegmentsFn(newWager);
     setRotation(0);
   }
 
@@ -224,7 +172,8 @@ export default function WheelPage() {
 
       setIsSpinning(true);
 
-      const res = await fetch("/api/spin/start", {
+      // IMPORTANT: this matches your original repo (POST /api/spin)
+      const res = await fetch("/api/spin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wager }),
@@ -233,30 +182,27 @@ export default function WheelPage() {
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         setIsSpinning(false);
-        setError(data?.error ?? "SERVER_ERROR");
+        setError((data && data.error) || "SERVER_ERROR");
         await fetchSpinState();
         return;
       }
 
-      const data: SpinState = await res.json();
+      const data = await res.json();
       setSpinState(data);
 
-      if (!data.resultIndex && data.resultIndex !== 0) {
-        // should not happen, but fail safe
+      if (data.resultIndex == null) {
         setIsSpinning(false);
         await fetchSpinState();
         return;
       }
 
-      const duration = data.durationMs ?? 10000;
+      const duration = data.durationMs || 10000;
       const target = computeTargetRotation(data.resultIndex, duration);
 
-      // animate wheel
       requestAnimationFrame(() => {
         setRotation(target);
       });
 
-      // wait until spin duration then complete
       setTimeout(async () => {
         try {
           const res2 = await fetch("/api/spin/complete", {
@@ -264,23 +210,22 @@ export default function WheelPage() {
           });
           const result = await res2.json().catch(() => null);
 
-          if (res2.ok && result?.prize) {
-            setWinner(result.prize as string);
+          if (res2.ok && result && result.prize) {
+            setWinner(result.prize);
           } else if (!res2.ok) {
-            setError(result?.error ?? "SERVER_ERROR");
+            setError((result && result.error) || "SERVER_ERROR");
           }
         } catch (e) {
           console.error(e);
           setError("SERVER_ERROR");
         } finally {
           setIsSpinning(false);
-          // refresh everything after spin
           const updated = await fetchMe();
           setMe(updated);
           await fetchSpinState();
-          await fetchRecentWins(); // <---- immediate rewards refresh
+          await fetchRecentWins(); // refresh rewards immediately after spin
         }
-      }, duration + 200);
+      }, (data.durationMs || 10000) + 200);
     } catch (e) {
       console.error(e);
       setError("SERVER_ERROR");
@@ -288,7 +233,7 @@ export default function WheelPage() {
     }
   }
 
-  async function handleBuy(storeItemId: string, price: number) {
+  async function handleBuy(storeItemId, price) {
     try {
       setError(null);
       if (!me) {
@@ -308,17 +253,17 @@ export default function WheelPage() {
 
       const data = await res.json().catch(() => null);
 
-      if (!res.ok || !data?.ok) {
-        setError(data?.error ?? "SERVER_ERROR");
+      if (!res.ok || !data || !data.ok) {
+        setError((data && data.error) || "SERVER_ERROR");
         return;
       }
 
-      const newBalance = Number(data.newBalance ?? 0);
+      const newBalance = Number(data.newBalance || 0);
       setMe((prev) =>
         prev ? { ...prev, balance: newBalance } : prev
       );
 
-      // refresh rewards so store purchase appears if logged
+      // refresh rewards so store purchase appears if logged there
       await fetchRecentWins();
     } catch (e) {
       console.error(e);
@@ -326,10 +271,8 @@ export default function WheelPage() {
     }
   }
 
-  // ---------- render ----------
-
   const isLocked =
-    spinState?.status === "SPINNING" && spinState.isLocked;
+    spinState && spinState.status === "SPINNING" && spinState.isLocked;
 
   const spinDisabled =
     isSpinning || isLocked || !me || (me && me.balance < wager);
@@ -406,20 +349,16 @@ export default function WheelPage() {
 
                 const x1 =
                   radius +
-                  radius *
-                    Math.cos((Math.PI * startAngle) / 180);
+                  radius * Math.cos((Math.PI * startAngle) / 180);
                 const y1 =
                   radius +
-                  radius *
-                    Math.sin((Math.PI * startAngle) / 180);
+                  radius * Math.sin((Math.PI * startAngle) / 180);
                 const x2 =
                   radius +
-                  radius *
-                    Math.cos((Math.PI * endAngle) / 180);
+                  radius * Math.cos((Math.PI * endAngle) / 180);
                 const y2 =
                   radius +
-                  radius *
-                    Math.sin((Math.PI * endAngle) / 180);
+                  radius * Math.sin((Math.PI * endAngle) / 180);
 
                 const d = `M ${radius} ${radius} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`;
 
@@ -435,8 +374,7 @@ export default function WheelPage() {
                 ];
                 const fill = colors[idx % colors.length];
 
-                const textAngle =
-                  startAngle + anglePerSegment / 2;
+                const textAngle = startAngle + anglePerSegment / 2;
 
                 return (
                   <svg
@@ -466,12 +404,12 @@ export default function WheelPage() {
             </div>
           </div>
 
-          {/* balance + spin button */}
+          {/* balance + spin */}
           <div className="flex items-center gap-4 mt-4">
             <div className="px-4 py-2 rounded-md bg-gray-900 text-sm">
               Balance:{" "}
               <span className="font-semibold text-emerald-400">
-                {me?.balance ?? 0}
+                {me && me.balance != null ? me.balance : 0}
               </span>
             </div>
             <button
@@ -492,9 +430,7 @@ export default function WheelPage() {
           {/* store under wheel */}
           {storeItems.length > 0 && (
             <div className="mt-8 w-full">
-              <h3 className="text-lg font-semibold mb-2">
-                Do&apos;kon
-              </h3>
+              <h3 className="text-lg font-semibold mb-2">Do&apos;kon</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                 {storeItems
                   .filter((i) => i.active)
@@ -503,9 +439,7 @@ export default function WheelPage() {
                       key={item.id}
                       className="border border-gray-800 rounded-lg p-3 flex flex-col gap-2 bg-gray-950"
                     >
-                      <div className="font-semibold">
-                        {item.name}
-                      </div>
+                      <div className="font-semibold">{item.name}</div>
                       <div className="text-emerald-400">
                         {item.price} coin
                       </div>
@@ -539,7 +473,6 @@ export default function WheelPage() {
               : "Tizimga kirmagansiz"}
           </div>
 
-          {/* error */}
           {error && (
             <div className="mt-2 text-sm text-red-400">{error}</div>
           )}
@@ -582,7 +515,7 @@ export default function WheelPage() {
           <div className="bg-gray-900 rounded-2xl px-8 py-6 max-w-md text-center shadow-xl">
             <div className="text-lg mb-3">
               <span className="font-semibold">
-                {me?.name || me?.login}
+                {me ? me.name || me.login : ""}
               </span>{" "}
               siz{" "}
               <span className="font-semibold text-emerald-400">
